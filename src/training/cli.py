@@ -59,7 +59,6 @@ def _run_train(cfg: DictConfig) -> None:
     train_cfg = TrainConfig(
         model_name=cfg.model.name,
         data_dir=cfg.train.data_dir,
-        shard_id=cfg.train.shard_id,
         batch_size=cfg.train.batch_size,
         num_epochs=cfg.train.num_epochs,
         lr=cfg.train.lr,
@@ -68,6 +67,7 @@ def _run_train(cfg: DictConfig) -> None:
         output_dir=cfg.train.output_dir,
         use_lora=cfg.train.use_lora,
         lora=lora_settings,
+        shard_filename_template=cfg.train.shard_filename_template,
         deepspeed_config=ds_config,
         metrics_port=cfg.train.metrics_port,
         max_steps=cfg.train.max_steps,

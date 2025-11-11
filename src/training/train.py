@@ -38,7 +38,6 @@ class LoraSettings:
 class TrainConfig:
     model_name: str
     data_dir: str
-    shard_id: int = 0
     batch_size: int = 4
     num_epochs: int = 1
     lr: float = 5e-5
@@ -47,6 +46,7 @@ class TrainConfig:
     output_dir: str = "./outputs"
     use_lora: bool = False
     lora: Optional[LoraSettings] = None
+    shard_filename_template: str = "shard_{id}.pt"
     deepspeed_config: Optional[str] = None
     metrics_port: int = 8000
     max_steps: Optional[int] = None  # for quick tests
@@ -80,12 +80,70 @@ def _get_deepspeed_grad_norm(ds_engine) -> Optional[float]:
     return float(value)
 
 
+def _env_int(*keys: str) -> Optional[int]:
+    for key in keys:
+        value = os.environ.get(key)
+        if value is None:
+            continue
+        try:
+            return int(value)
+        except ValueError:
+            continue
+    return None
+
+
+def _detect_world_size() -> int:
+    env_world_size = _env_int("WORLD_SIZE")
+    if env_world_size and env_world_size > 0:
+        return env_world_size
+    if torch.distributed.is_available() and torch.distributed.is_initialized():
+        return torch.distributed.get_world_size()
+    return 1
+
+
+def _detect_rank() -> int:
+    env_rank = _env_int("RANK", "SLURM_PROCID")
+    if env_rank is not None and env_rank >= 0:
+        return env_rank
+    if torch.distributed.is_available() and torch.distributed.is_initialized():
+        return torch.distributed.get_rank()
+    return 0
+
+
+def _resolve_data_shard(cfg: TrainConfig) -> tuple[str, str, int, int]:
+    world_size = _detect_world_size()
+    rank = _detect_rank()
+    try:
+        shard_filename = cfg.shard_filename_template.format(
+            rank=rank, world_size=world_size
+        )
+    except KeyError as err:
+        raise ValueError(
+            "shard_filename_template must contain '{id}' or '{rank}' placeholder."
+        ) from err
+    except Exception as err:
+        raise ValueError(
+            f"Failed to render shard_filename_template '{cfg.shard_filename_template}': {err}"
+        ) from err
+    shard_path = os.path.join(cfg.data_dir, shard_filename)
+    return shard_path, shard_filename, rank, world_size
+
+
 def run_training(cfg: TrainConfig):
     os.makedirs(cfg.output_dir, exist_ok=True)
 
     start_metrics_server(cfg.metrics_port)
 
-    ds = load_sharded_dataset(cfg.data_dir, cfg.shard_id)
+    shard_path, shard_name, rank, world_size = _resolve_data_shard(cfg)
+    print(f"[rank {rank}/{world_size}] Loading {shard_name} from {cfg.data_dir}")
+    try:
+        ds = load_sharded_dataset(shard_path)
+    except FileNotFoundError as err:
+        raise FileNotFoundError(
+            f"Shard file '{shard_name}' not found in {cfg.data_dir}. "
+            f"Computed using rank={rank} and template '{cfg.shard_filename_template}'. "
+            "Adjust train.shard_filename_template or ensure the shard exists."
+        ) from err
     dataloader = get_dataloader(ds, batch_size=cfg.batch_size)
 
     model = load_base_model(cfg.model_name, device_map=None)  # let DeepSpeed handle

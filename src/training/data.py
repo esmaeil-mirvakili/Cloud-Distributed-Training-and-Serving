@@ -100,8 +100,7 @@ def preprocess_and_save_shards(
         print(f"Saved shard {shard_id} with {len(shard)} examples to {path}")
 
 
-def load_sharded_dataset(data_dir: str, shard_id: int) -> Dataset:
-    path = os.path.join(data_dir, f"shard_{shard_id}.pt")
-    if not os.path.exists(path):
-        raise FileNotFoundError(path)
-    return torch.load(path, weights_only=False)
+def load_sharded_dataset(shard_path: str) -> Dataset:
+    if not os.path.exists(shard_path):
+        raise FileNotFoundError(shard_path)
+    return torch.load(shard_path, weights_only=False)

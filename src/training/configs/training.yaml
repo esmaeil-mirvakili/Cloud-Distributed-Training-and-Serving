@@ -36,7 +36,7 @@ preprocess:
 
 train:
   data_dir: data/dolly_shards
-  shard_id: 0
+  shard_filename_template: shard_{rank}.pt
   batch_size: 4
   num_epochs: 1
   lr: 5e-5
