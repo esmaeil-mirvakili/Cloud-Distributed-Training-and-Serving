@@ -1,0 +1,49 @@
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+
+# Which action to perform: "preprocess" or "train"
+mode: train
+
+dataset:
+  name: databricks/databricks-dolly-15k
+  split: train
+  subset: null
+
+formatter:
+  _target_: training.data.formatting.InstructionFormatter
+  instruction_field: instruction
+  input_field: input
+  target_field: output
+  template: null
+
+model:
+  name: gpt2
+  max_length: 512
+
+lora:
+  r: 8
+  alpha: 16
+  dropout: 0.05
+  target_modules:
+    - q_proj
+    - v_proj
+
+preprocess:
+  output_dir: data/dolly_shards
+  num_shards: 4
+
+train:
+  data_dir: data/dolly_shards
+  shard_id: 0
+  batch_size: 4
+  num_epochs: 1
+  lr: 5e-5
+  weight_decay: 0.01
+  warmup_ratio: 0.03
+  output_dir: outputs/dolly_sft
+  use_lora: false
+  metrics_port: 8000
+  max_steps: null
+  deepspeed_config_path: null
