@@ -1,6 +1,7 @@
 import time
 import threading
 import psutil
+from loguru import logger
 from prometheus_client import start_http_server, Gauge, Summary
 
 try:
@@ -33,7 +34,9 @@ def _monitor_resources(interval: float = 5.0):
             handle = pynvml.nvmlDeviceGetHandleByIndex(0)  # assumes 1 GPU
             gpu_enabled = True
         except pynvml.NVMLError as e:
-            print(f"[metrics] NVML not available, disabling GPU metrics: {e}")
+            logger.warning(
+                "[metrics] NVML not available, disabling GPU metrics: {}", e
+            )
             gpu_enabled = False
 
     proc = psutil.Process()
@@ -47,7 +50,7 @@ def _monitor_resources(interval: float = 5.0):
                 gpu_memory_used.set(mem.used)
             except pynvml.NVMLError as e:
                 # If something goes wrong later, just stop GPU metrics
-                print(f"[metrics] NVML error, turning off GPU metrics: {e}")
+                logger.warning("[metrics] NVML error, turning off GPU metrics: {}", e)
                 gpu_enabled = False
 
         cpu_utilization.set(psutil.cpu_percent(interval=None))

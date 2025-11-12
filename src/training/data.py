@@ -1,18 +1,26 @@
 from __future__ import annotations
-from typing import Optional
-import os, math, torch
-from datasets import load_dataset, Dataset
+from typing import Optional, Tuple
+import os, math, shutil, random
+from datasets import load_dataset, Dataset, load_from_disk, DatasetDict
+from loguru import logger
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
-from training.data.formatting import ExampleFormatter
+from training.formatting import ExampleFormatter
 
 
 def load_hf_dataset(
-    dataset_name: str, split: str = "train", subset: Optional[str] = None
+    dataset_name: str,
+    split: str = "train",
+    subset: Optional[str] = None,
+    limit: Optional[int] = None,
 ) -> Dataset:
     if subset is not None:
-        return load_dataset(dataset_name, subset, split=split)
-    return load_dataset(dataset_name, split=split)
+        ds = load_dataset(dataset_name, subset, split=split)
+    else:
+        ds = load_dataset(dataset_name, split=split)
+    if limit is not None:
+        ds = ds.select(range(min(limit, len(ds))))
+    return ds
 
 
 def tokenize_dataset(
@@ -82,25 +90,85 @@ def preprocess_and_save_shards(
     output_dir: str,
     split: str = "train",
     subset: Optional[str] = None,
+    val_subset: Optional[str] = None,
+    train_max_examples: Optional[int] = None,
+    val_max_examples: Optional[int] = None,
     max_length: int = 512,
-    num_shards: int = 1,
+    num_train_shards: int = 1,
+    num_val_shards: int = 0,
+    val_split_ratio: float = 0.0,
 ) -> None:
     os.makedirs(output_dir, exist_ok=True)
     tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    ds = load_hf_dataset(dataset_name, split=split, subset=subset)
-    tokenized = tokenize_dataset(ds, tokenizer, formatter, max_length=max_length)
+    train_ds = load_hf_dataset(
+        dataset_name, split=split, subset=subset, limit=train_max_examples
+    )
+    val_ds = None
+    if val_subset is not None:
+        val_ds = load_hf_dataset(
+            dataset_name, split=split, subset=val_subset, limit=val_max_examples
+        )
+    elif 0 < val_split_ratio < 1:
+        split_dict: DatasetDict = train_ds.train_test_split(test_size=val_split_ratio)
+        train_ds = split_dict["train"]
+        val_ds = split_dict["test"]
 
-    for shard_id in range(num_shards):
-        shard = shard_dataset(tokenized, num_shards=num_shards, shard_id=shard_id)
-        path = os.path.join(output_dir, f"shard_{shard_id}.pt")
-        torch.save(shard, path)
-        print(f"Saved shard {shard_id} with {len(shard)} examples to {path}")
+    train_tokenized = tokenize_dataset(
+        train_ds, tokenizer, formatter, max_length=max_length
+    )
+    _save_tokenized_splits(
+        train_tokenized,
+        output_dir,
+        prefix="shard",
+        num_shards=num_train_shards,
+    )
+
+    if val_ds is not None and num_val_shards > 0:
+        val_tokenized = tokenize_dataset(
+            val_ds, tokenizer, formatter, max_length=max_length
+        )
+        _save_tokenized_splits(
+            val_tokenized,
+            output_dir,
+            prefix="val_shard",
+            num_shards=num_val_shards,
+        )
 
 
 def load_sharded_dataset(shard_path: str) -> Dataset:
     if not os.path.exists(shard_path):
         raise FileNotFoundError(shard_path)
-    return torch.load(shard_path, weights_only=False)
+    dataset = load_from_disk(shard_path)
+    dataset.set_format(type="torch")
+    return dataset
+
+
+def _save_tokenized_splits(
+    tokenized: Dataset,
+    output_dir: str,
+    prefix: str,
+    num_shards: int,
+) -> None:
+    for shard_id in range(num_shards):
+        shard = shard_dataset(tokenized, num_shards=max(1, num_shards), shard_id=shard_id)
+        shard = shard.remove_columns(
+            [
+                col
+                for col in shard.column_names
+                if col not in {"input_ids", "attention_mask", "labels"}
+            ]
+        )
+        shard_path = os.path.join(output_dir, f"{prefix}_{shard_id}")
+        if os.path.exists(shard_path):
+            shutil.rmtree(shard_path)
+        shard.save_to_disk(shard_path)
+        logger.info(
+            "Saved {} {} with {} examples to {}",
+            prefix,
+            shard_id,
+            len(shard),
+            shard_path,
+        )

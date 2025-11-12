@@ -1,291 +1,68 @@
-from dataclasses import dataclass, asdict
-from typing import Optional
-import math
-import os
+from __future__ import annotations
+
+from dataclasses import asdict
 import json
+import os
 import time
+from importlib import import_module
+from typing import Type
 
-import torch
-from torch.utils.data import DataLoader
-from torch.optim import AdamW
-from transformers import get_linear_schedule_with_warmup
+from loguru import logger
 
-import deepspeed
+from training.logging_utils import setup_logging
+from training.metrics import start_metrics_server
+from training.train.config import LoraSettings, TrainConfig
 
-from training.data.data import load_sharded_dataset, get_dataloader
-from training.model import load_base_model, apply_lora, load_tokenizer
-from training.metrics import (
-    training_loss,
-    training_perplexity,
-    gradient_norm as gradient_norm_metric,
-    global_step as global_step_metric,
-    step_time,
-    steps_per_second,
-    tokens_per_second,
-    start_metrics_server,
-)
-
-
-@dataclass
-class LoraSettings:
-    r: int = 8
-    alpha: int = 16
-    dropout: float = 0.05
-    target_modules: Optional[list[str]] = None
-
-
-@dataclass
-class TrainConfig:
-    model_name: str
-    data_dir: str
-    batch_size: int = 4
-    num_epochs: int = 1
-    lr: float = 5e-5
-    weight_decay: float = 0.01
-    warmup_ratio: float = 0.03
-    output_dir: str = "./outputs"
-    use_lora: bool = False
-    lora: Optional[LoraSettings] = None
-    shard_filename_template: str = "shard_{id}.pt"
-    deepspeed_config: Optional[str] = None
-    metrics_port: int = 8000
-    max_steps: Optional[int] = None  # for quick tests
-
-
-def _compute_grad_norm(parameters) -> Optional[float]:
-    total_norm = 0.0
-    has_grad = False
-    for param in parameters:
-        if param.grad is None:
-            continue
-        has_grad = True
-        param_norm = param.grad.data.norm(2)
-        total_norm += param_norm.item() ** 2
-    if not has_grad:
-        return None
-    return math.sqrt(total_norm)
-
-
-def _get_deepspeed_grad_norm(ds_engine) -> Optional[float]:
-    if ds_engine is None or not hasattr(ds_engine, "get_global_grad_norm"):
-        return None
-    try:
-        value = ds_engine.get_global_grad_norm()
-    except TypeError:
-        return None
-    if value is None:
-        return None
-    if hasattr(value, "item"):
-        value = value.item()
-    return float(value)
-
-
-def _env_int(*keys: str) -> Optional[int]:
-    for key in keys:
-        value = os.environ.get(key)
-        if value is None:
-            continue
-        try:
-            return int(value)
-        except ValueError:
-            continue
-    return None
-
-
-def _detect_world_size() -> int:
-    env_world_size = _env_int("WORLD_SIZE")
-    if env_world_size and env_world_size > 0:
-        return env_world_size
-    if torch.distributed.is_available() and torch.distributed.is_initialized():
-        return torch.distributed.get_world_size()
-    return 1
-
-
-def _detect_rank() -> int:
-    env_rank = _env_int("RANK", "SLURM_PROCID")
-    if env_rank is not None and env_rank >= 0:
-        return env_rank
-    if torch.distributed.is_available() and torch.distributed.is_initialized():
-        return torch.distributed.get_rank()
-    return 0
-
-
-def _resolve_data_shard(cfg: TrainConfig) -> tuple[str, str, int, int]:
-    world_size = _detect_world_size()
-    rank = _detect_rank()
-    try:
-        shard_filename = cfg.shard_filename_template.format(
-            rank=rank, world_size=world_size
-        )
-    except KeyError as err:
-        raise ValueError(
-            "shard_filename_template must contain '{id}' or '{rank}' placeholder."
-        ) from err
-    except Exception as err:
-        raise ValueError(
-            f"Failed to render shard_filename_template '{cfg.shard_filename_template}': {err}"
-        ) from err
-    shard_path = os.path.join(cfg.data_dir, shard_filename)
-    return shard_path, shard_filename, rank, world_size
+__all__ = ["TrainConfig", "LoraSettings", "run_training"]
 
 
 def run_training(cfg: TrainConfig):
     os.makedirs(cfg.output_dir, exist_ok=True)
 
-    start_metrics_server(cfg.metrics_port)
+    trainer_cls = _import_trainer(cfg.trainer_class)
+    trainer = trainer_cls(cfg)
 
-    shard_path, shard_name, rank, world_size = _resolve_data_shard(cfg)
-    print(f"[rank {rank}/{world_size}] Loading {shard_name} from {cfg.data_dir}")
-    try:
-        ds = load_sharded_dataset(shard_path)
-    except FileNotFoundError as err:
-        raise FileNotFoundError(
-            f"Shard file '{shard_name}' not found in {cfg.data_dir}. "
-            f"Computed using rank={rank} and template '{cfg.shard_filename_template}'. "
-            "Adjust train.shard_filename_template or ensure the shard exists."
-        ) from err
-    dataloader = get_dataloader(ds, batch_size=cfg.batch_size)
+    setup_logging(
+        cfg.output_dir,
+        rank=getattr(trainer, "rank", 0),
+        world_size=getattr(trainer, "world_size", 1),
+        process="train",
+    )
+    logger.info("Resolved training config:\n{}", json.dumps(asdict(cfg), indent=2))
 
-    model = load_base_model(cfg.model_name, device_map=None)  # let DeepSpeed handle
-    if cfg.use_lora:
-        lora_cfg = cfg.lora or LoraSettings()
-        model = apply_lora(
-            model,
-            r=lora_cfg.r,
-            lora_alpha=lora_cfg.alpha,
-            lora_dropout=lora_cfg.dropout,
-            target_modules=lora_cfg.target_modules,
-        )
+    if cfg.metrics_port:
+        logger.info("Starting metrics server on port {}", cfg.metrics_port)
+        start_metrics_server(cfg.metrics_port)
 
-    no_decay = ["bias", "LayerNorm.weight"]
-    optimizer_grouped_parameters = [
-        {
-            "params": [
-                p
-                for n, p in model.named_parameters()
-                if not any(nd in n for nd in no_decay)
-            ],
-            "weight_decay": cfg.weight_decay,
-        },
-        {
-            "params": [
-                p
-                for n, p in model.named_parameters()
-                if any(nd in n for nd in no_decay)
-            ],
-            "weight_decay": 0.0,
-        },
-    ]
-
-    num_update_steps_per_epoch = len(dataloader)
-    t_total = num_update_steps_per_epoch * cfg.num_epochs
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    if cfg.deepspeed_config:
-        model, optimizer, _, scheduler = deepspeed.initialize(
-            model=model,
-            model_parameters=optimizer_grouped_parameters,
-            config=cfg.deepspeed_config,
-        )
-        ds_engine = model
-    else:
-        model.to(device)
-        optimizer = AdamW(optimizer_grouped_parameters, lr=cfg.lr)
-        scheduler = get_linear_schedule_with_warmup(
-            optimizer,
-            num_warmup_steps=int(cfg.warmup_ratio * t_total),
-            num_training_steps=t_total,
-        )
-        ds_engine = None
-
-    global_step = 0
-    model.train()
     t0 = time.time()
-
-    for epoch in range(cfg.num_epochs):
-        for batch in dataloader:
-            step_start = time.time()
-            input_ids = batch["input_ids"]
-            attention_mask = batch["attention_mask"]
-            labels = batch["labels"]
-            token_count = attention_mask.sum().item()
-            grad_norm_value = None
-
-            if ds_engine is None:
-                input_ids = input_ids.to(device)
-                attention_mask = attention_mask.to(device)
-                labels = labels.to(device)
-
-                outputs = model(
-                    input_ids=input_ids,
-                    attention_mask=attention_mask,
-                    labels=labels,
-                )
-                loss = outputs.loss
-                loss.backward()
-                grad_norm_value = _compute_grad_norm(model.parameters())
-                optimizer.step()
-                scheduler.step()
-                optimizer.zero_grad()
-            else:
-                input_ids = input_ids.to(ds_engine.local_rank)
-                attention_mask = attention_mask.to(ds_engine.local_rank)
-                labels = labels.to(ds_engine.local_rank)
-
-                outputs = ds_engine(
-                    input_ids=input_ids,
-                    attention_mask=attention_mask,
-                    labels=labels,
-                )
-                loss = outputs.loss
-                ds_engine.backward(loss)
-                grad_norm_value = _get_deepspeed_grad_norm(ds_engine)
-                ds_engine.step()
-
-            step_duration = time.time() - step_start
-            step_time.observe(step_duration)
-            if step_duration > 0:
-                steps_per_second.set(1.0 / step_duration)
-                tokens_per_second.set(token_count / step_duration)
-            else:
-                steps_per_second.set(0.0)
-                tokens_per_second.set(0.0)
-            loss_value = loss.item()
-            perplexity_value = math.exp(min(loss_value, 20))
-            training_loss.set(loss_value)
-            training_perplexity.set(perplexity_value)
-            if grad_norm_value is not None:
-                gradient_norm_metric.set(grad_norm_value)
-            global_step += 1
-            global_step_metric.set(global_step)
-
-            if cfg.max_steps and global_step >= cfg.max_steps:
-                break
-
-        if cfg.max_steps and global_step >= cfg.max_steps:
-            break
-
+    trainer.train()
     total_time = time.time() - t0
+    save_path = trainer.export_model()
 
-    # Save model / adapter
-    if cfg.use_lora:
-        save_path = os.path.join(cfg.output_dir, "lora_adapter")
-        os.makedirs(save_path, exist_ok=True)
-        model.save_pretrained(save_path)
-    else:
-        save_path = os.path.join(cfg.output_dir, "full_finetuned")
-        os.makedirs(save_path, exist_ok=True)
-        # deepspeed engine requires .module
-        target = model.module if hasattr(model, "module") else model
-        target.save_pretrained(save_path)
+    if trainer.is_main_process:
+        summary = {
+            "config": asdict(cfg),
+            "global_step": trainer.global_step,
+            "total_time_seconds": total_time,
+        }
+        with open(os.path.join(cfg.output_dir, "summary.json"), "w") as f:
+            json.dump(summary, f, indent=2)
 
-    summary = {
-        "config": asdict(cfg),
-        "global_step": global_step,
-        "total_time_seconds": total_time,
-    }
-    with open(os.path.join(cfg.output_dir, "summary.json"), "w") as f:
-        json.dump(summary, f, indent=2)
+        logger.info(
+            "Training done in {:.1f}s, steps={}", total_time, trainer.global_step
+        )
+        if save_path:
+            logger.info("Model saved to {}", save_path)
 
-    print(f"Training done in {total_time:.1f}s, steps={global_step}")
-    print(f"Model saved to {save_path}")
+
+def _import_trainer(path: str) -> Type:
+    module_path, _, class_name = path.rpartition(".")
+    if not module_path:
+        raise ValueError(
+            f"trainer_class must be a full module path, got '{path}' instead"
+        )
+    module = import_module(module_path)
+    if not hasattr(module, class_name):
+        raise ImportError(f"Module '{module_path}' has no attribute '{class_name}'")
+    trainer_cls = getattr(module, class_name)
+    return trainer_cls

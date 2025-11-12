@@ -1,0 +1,119 @@
+version: "3.9"
+
+x-shared-env: &default-env
+  HF_HOME: /opt/hf_cache
+  TOKENIZERS_PARALLELISM: "false"
+  HYDRA_FULL_ERROR: "1"
+
+services:
+  preprocess:
+    image: training-stack:local
+    restart: "no"
+    environment:
+      <<: *default-env
+    command: >
+      train-llm mode=preprocess
+      dataset.name=databricks/databricks-dolly-15k
+      dataset.split=train
+      preprocess.output_dir=/shared_data
+      preprocess.train.num_shards=3
+      preprocess.train.max_examples=150
+      preprocess.val.num_shards=1
+      preprocess.val.max_examples=50
+      preprocess.val_split_ratio=0.1
+      model.name=gpt2
+      model.max_length=512
+    volumes:
+      - ../../data:/shared_data
+      - ../../outputs:/outputs
+      - ../../infrastructure/docker:/config
+    networks:
+      - training
+
+  trainer0:
+    image: training-stack:local
+    restart: "no"
+    depends_on:
+      preprocess:
+        condition: service_completed_successfully
+    command: >
+      train-llm mode=train
+      train.data_dir=/shared_data
+      train.output_dir=/outputs/rank0
+      train.deepspeed_config_path=/config/deepspeed_zero2.json
+      train.train_shard_template=\"shard_{rank}\"
+      train.val_shard_template=\"val_shard_0\"
+      train.max_steps=50
+    environment:
+      <<: *default-env
+      MASTER_ADDR: trainer0
+      MASTER_PORT: "6100"
+      WORLD_SIZE: "3"
+      RANK: "0"
+      LOCAL_RANK: "0"
+    volumes:
+      - ../../data:/shared_data
+      - ../../outputs:/outputs
+      - ../../infrastructure/docker/deepspeed_zero2.json:/config/deepspeed_zero2.json:ro
+    networks:
+      - training
+
+  trainer1:
+    image: training-stack:local
+    restart: "no"
+    depends_on:
+      preprocess:
+        condition: service_completed_successfully
+    command: >
+      train-llm mode=train
+      train.data_dir=/shared_data
+      train.output_dir=/outputs/rank1
+      train.deepspeed_config_path=/config/deepspeed_zero2.json
+      train.train_shard_template=\"shard_{rank}\"
+      train.val_shard_template=\"val_shard_0\"
+      train.max_steps=50
+    environment:
+      <<: *default-env
+      MASTER_ADDR: trainer0
+      MASTER_PORT: "6100"
+      WORLD_SIZE: "3"
+      RANK: "1"
+      LOCAL_RANK: "0"
+    volumes:
+      - ../../data:/shared_data
+      - ../../outputs:/outputs
+      - ../../infrastructure/docker/deepspeed_zero2.json:/config/deepspeed_zero2.json:ro
+    networks:
+      - training
+
+  trainer2:
+    image: training-stack:local
+    restart: "no"
+    depends_on:
+      preprocess:
+        condition: service_completed_successfully
+    command: >
+      train-llm mode=train
+      train.data_dir=/shared_data
+      train.output_dir=/outputs/rank2
+      train.deepspeed_config_path=/config/deepspeed_zero2.json
+      train.train_shard_template=\"shard_{rank}\"
+      train.val_shard_template=\"val_shard_0\"
+      train.max_steps=50
+    environment:
+      <<: *default-env
+      MASTER_ADDR: trainer0
+      MASTER_PORT: "6100"
+      WORLD_SIZE: "3"
+      RANK: "2"
+      LOCAL_RANK: "0"
+    volumes:
+      - ../../data:/shared_data
+      - ../../outputs:/outputs
+      - ../../infrastructure/docker/deepspeed_zero2.json:/config/deepspeed_zero2.json:ro
+    networks:
+      - training
+
+networks:
+  training:
+    driver: bridge

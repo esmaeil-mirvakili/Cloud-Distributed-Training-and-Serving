@@ -13,7 +13,18 @@ dependencies = [
   "pynvml>=11.5.0",
   "pyyaml>=6.0.0",
   "hydra-core>=1.3.2",
+  "loguru>=0.7.2",
 ]
 
 [project.scripts]
 train-llm = "training.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["training*", "serving*"]
+
+[tool.setuptools.package-data]
+"training.configs" = ["*.yaml"]

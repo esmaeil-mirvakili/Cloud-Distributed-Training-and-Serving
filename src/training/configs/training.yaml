@@ -10,9 +10,11 @@ dataset:
   name: databricks/databricks-dolly-15k
   split: train
   subset: null
+  val_subset: null
+  val_split_ratio: 0.05
 
 formatter:
-  _target_: training.data.formatting.InstructionFormatter
+  _target_: training.formatting.InstructionFormatter
   instruction_field: instruction
   input_field: input
   target_field: output
@@ -31,13 +33,28 @@ lora:
     - v_proj
 
 preprocess:
-  output_dir: data/dolly_shards
-  num_shards: 4
+  output_dir: data
+  train:
+    num_shards: 4
+    subset: null
+    max_examples: null
+  val:
+    num_shards: 1
+    subset: null
+    max_examples: null
+  val_split_ratio: 0.05
 
 train:
-  data_dir: data/dolly_shards
-  shard_filename_template: shard_{rank}.pt
+  data_dir: data
+  train_shard_template: shard_{rank}
+  val_shard_template: null
+  trainer_class: training.train.sft_trainer.SFTTrainer
+  model_builder: null
+  optimizer_builder: null
+  scheduler_builder: null
+  metrics_logger: null
   batch_size: 4
+  val_batch_size: null
   num_epochs: 1
   lr: 5e-5
   weight_decay: 0.01
