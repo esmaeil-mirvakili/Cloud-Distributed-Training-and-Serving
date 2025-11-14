@@ -41,3 +41,4 @@ class TrainConfig:
     optimizer_builder: Optional[OptimizerBuilderFn] = None
     scheduler_builder: Optional[SchedulerBuilderFn] = None
     metrics_logger: Optional[MetricsLoggerFn] = None
+    log_every_n_steps: Optional[int] = None

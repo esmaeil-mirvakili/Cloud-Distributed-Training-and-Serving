@@ -207,19 +207,19 @@ class BaseTrainer(ABC):
         self.on_setup_end()
 
     def on_setup_start(self) -> None:
-        pass
+        logger.info("Starting to configure the trainer...")
 
     def on_setup_end(self) -> None:
-        pass
+        logger.info("Trainer configuration done...")
 
     def on_train_start(self) -> None:
-        pass
+        logger.info("Starting the training...")
 
     def on_train_end(self) -> None:
         pass
 
     def on_epoch_start(self, epoch: int) -> None:
-        pass
+        logger.info(f"Epoch {epoch} started...")
 
     def on_epoch_end(self, epoch: int) -> None:
         pass

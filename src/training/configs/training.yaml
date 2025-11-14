@@ -64,3 +64,4 @@ train:
   metrics_port: 8000
   max_steps: null
   deepspeed_config_path: null
+  log_every_n_steps: 1

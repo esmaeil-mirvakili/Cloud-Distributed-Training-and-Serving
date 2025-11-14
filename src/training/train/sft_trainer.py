@@ -35,7 +35,7 @@ class SFTTrainer(BaseTrainer):
         trainer_config = {
             "max_epochs": cfg.num_epochs,
             "max_steps": cfg.max_steps,
-            "log_every_n_steps": 1,
+            "log_every_n_steps": cfg.log_every_n_steps,
         }
         super().__init__(trainer_config)
         self.cfg = cfg
