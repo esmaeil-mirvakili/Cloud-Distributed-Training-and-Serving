@@ -1,0 +1,48 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: preprocess-shards
+  namespace: cse239fall2025
+spec:
+  template:
+    metadata:
+      labels:
+        app: preprocess-shards
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: preprocess
+          image: docker.io/esmaeilmirvakili/training_infra:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: HF_HOME
+              value: /opt/hf_cache
+            - name: TOKENIZERS_PARALLELISM
+              value: "false"
+          resources:
+            limits:
+              cpu: 1
+              memory: 2Gi
+            requests:
+              cpu: 1
+              memory: 2Gi
+          command:
+            - train-llm
+            - mode=preprocess
+            - dataset.name=databricks/databricks-dolly-15k
+            - dataset.split=train
+            - preprocess.output_dir=/data
+            - preprocess.train.num_shards=3
+            - preprocess.train.max_examples=150
+            - preprocess.val.num_shards=1
+            - preprocess.val.max_examples=50
+            - preprocess.val_split_ratio=0.1
+            - model.name=gpt2
+            - model.max_length=512
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: training-data
