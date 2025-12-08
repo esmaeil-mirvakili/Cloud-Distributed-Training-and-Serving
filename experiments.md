@@ -55,7 +55,9 @@ B. CPU vs GPU comparison
 Your plan: treat WildChat’s original ChatGPT responses as a reference and score ROUGE/BLEU/BERTScore.  ￼
 
 A. Quality experiment
-	•	Run inference on the fixed WildChat quality subset on the 2 selected models (7B + 13B, or 7B only if fallback is required)
+	•	Run inference on the fixed WildChat quality subset (100) on the TinyLlama-1.1B-Chat-GGUF and Phi-2-GGUF on CPU
+	•	Script: `python experiments/quality/run_quality_experiments.py --config experiments/quality/quality_config.example.yaml --output outputs/quality_results.json`
+	•	Input format: JSONL with fields `prompt` and `reference` (configurable)
 	•	Compute:
 	•	ROUGE, BLEU, BERTScore  ￼
 
