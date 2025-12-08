@@ -79,10 +79,10 @@ RUN pip install --no-cache-dir \
        nvidia-ml-py3
 
 # Install the CUDA-built llama-cpp-python wheel from the build stage
-COPY --from=build /wheelhouse/*.whl /tmp/
-RUN pip install --no-cache-dir /tmp/*.whl && rm -rf /tmp/*.whl
+# COPY --from=build /wheelhouse/*.whl /tmp/
+# RUN pip install --no-cache-dir /tmp/*.whl && rm -rf /tmp/*.whl
 
-# Bring in llama-server binary (optional but useful)
+# Bring in llama-server binary
 COPY --from=build /opt/llama.cpp/build/bin/llama-server /usr/local/bin/llama-server
 
 WORKDIR /app

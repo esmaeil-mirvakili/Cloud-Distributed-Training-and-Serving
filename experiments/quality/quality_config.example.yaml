@@ -34,8 +34,8 @@ experiments:
     temperature: 0.1
     max_tokens: 256
 
-  - name: phi2-q6-gpu
-    overlay: gpu
+  - name: phi2-q6-cpu
+    overlay: cpu
     env_overrides:
       HF_MODEL_REPO: TheBloke/Phi-2-GGUF
       HF_MODEL_FILE: Phi-2.Q6_K.gguf
