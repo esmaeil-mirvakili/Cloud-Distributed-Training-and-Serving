@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: smirvaki-llama-serving
+  namespace: cse239fall2025
+spec:
+  template:
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: nvidia.com/gpu.product
+                    operator: In
+                    values:
+                      - NVIDIA-L40
+                      - NVIDIA-L4
+      containers:
+        - name: api
+          env:
+            - name: LLAMA_GPU_LAYERS
+              value: "-1"  # set >0 to offload layers; adjust as needed
+              valueFrom: null
+          resources:
+            requests:
+              nvidia.com/gpu: "1"
+              cpu: "1"
+              memory: "2Gi"
+            limits:
+              nvidia.com/gpu: "1"
+              cpu: "4"
+              memory: "2Gi"

@@ -1,0 +1,52 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: smirvaki-llama-serving
+  namespace: cse239fall2025
+  labels:
+    app: smirvaki-llama-serving
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: smirvaki-llama-serving
+  minReplicas: 1
+  maxReplicas: 10
+  metrics:
+    # Primary: queue length (inflight requests) from the app's Prometheus metrics.
+    # Requires Prometheus Adapter or similar exposing llama_inflight_requests as a pod metric.
+    - type: Pods
+      pods:
+        metric:
+          name: llama_inflight_requests
+        target:
+          type: AverageValue
+          averageValue: "5"
+    # Safety: CPU utilization
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 75
+    # Safety: GPU utilization (requires Prometheus Adapter exposing llama_gpu_utilization_percent as a custom metric)
+    - type: External
+      external:
+        metric:
+          name: llama_gpu_utilization_percent
+        target:
+          type: AverageValue
+          averageValue: "80"
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 60
+      policies:
+        - type: Percent
+          value: 50
+          periodSeconds: 60

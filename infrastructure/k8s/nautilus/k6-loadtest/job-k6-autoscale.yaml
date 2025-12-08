@@ -1,0 +1,41 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: smirvaki-k6-autoscale
+  namespace: cse239fall2025
+  labels:
+    app: smirvaki-k6-autoscale
+spec:
+  ttlSecondsAfterFinished: 300
+  backoffLimit: 0
+  completions: 1
+  parallelism: 1
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: k6
+          image: grafana/k6:0.49.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - -e
+            - SERVICE_URL=$(SERVICE_URL)
+            - /scripts/autoscaletest.js
+          env:
+            - name: SERVICE_URL
+              value: "http://smirvaki-llama-serving.cse239fall2025.svc.cluster.local" # override if using ingress
+          volumeMounts:
+            - name: k6-scripts
+              mountPath: /scripts
+          resources:
+            requests:
+              cpu: "800m"
+              memory: "1Gi"
+            limits:
+              cpu: "960m"
+              memory: "1500Mi"
+      volumes:
+        - name: k6-scripts
+          configMap:
+            name: smirvaki-k6-scripts

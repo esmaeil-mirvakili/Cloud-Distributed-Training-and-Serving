@@ -1,0 +1,125 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: smirvaki-trainer
+  namespace: cse239fall2025
+spec:
+  podManagementPolicy: Parallel
+  serviceName: smirvaki-trainer
+  replicas: 1
+  selector:
+    matchLabels:
+      app: smirvaki-trainer
+  template:
+    metadata:
+      labels:
+        app: smirvaki-trainer
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+        - name: wait-for-prometheus
+          image: curlimages/curl:8.4.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              echo "Waiting for Prometheus at http://smirvaki-prometheus:9090/-/healthy"
+              until curl -sf --max-time 2 http://smirvaki-prometheus:9090/-/healthy; do
+                echo "Prometheus not ready, retrying..."
+                sleep 5
+              done
+              echo "Prometheus reachable, proceeding."
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: nvidia.com/gpu.product
+                    operator: In
+                    values:
+                      - NVIDIA-L40
+                      - NVIDIA-L4
+      containers:
+        - name: trainer
+          image: docker.io/esmaeilmirvakili/training_stack:latest
+          imagePullPolicy: Always
+          resources:
+            requests:
+              cpu: "1"
+              memory: 2Gi
+              nvidia.com/gpu: 1
+            limits:
+              cpu: "4"
+              memory: 8Gi
+              nvidia.com/gpu: 1
+          envFrom:
+            - configMapRef:
+                name: training-params
+          env:
+            - name: HF_HOME
+              value: /opt/hf_cache
+            - name: TOKENIZERS_PARALLELISM
+              value: "false"
+            - name: TORCH_NCCL_ASYNC_ERROR_HANDLING
+              value: "1"
+            - name: TORCH_NCCL_BLOCKING_WAIT
+              value: "1"
+            - name: TORCH_NCCL_DEBUG
+              value: INFO
+            - name: TORCH_NCCL_SOCKET_IFNAME
+              value: eth0
+          command:
+            - /bin/bash
+            - -lc
+            - |
+              set -euo pipefail
+              ordinal=${HOSTNAME##*-}
+              export RANK=${ordinal}
+              export WORLD_SIZE=${TRAINER_REPLICAS:-1}
+              export LOCAL_RANK=0
+              export MASTER_ADDR=smirvaki-trainer-0.smirvaki-trainer.cse239fall2025.svc.cluster.local
+              export MASTER_PORT=6100
+              export HYDRA_FULL_ERROR=1
+
+              MODEL_NAME=${MODEL_NAME:-gpt2}
+              MODEL_MAX_LENGTH=${MODEL_MAX_LENGTH:-512}
+              LORA_TARGET_MODULES=${LORA_TARGET_MODULES:-q_proj,v_proj}
+              TRAIN_BATCH_SIZE=${TRAIN_BATCH_SIZE:-4}
+              TRAIN_NUM_EPOCHS=${TRAIN_NUM_EPOCHS:-1}
+              TRAIN_LR=${TRAIN_LR:-5e-5}
+              TRAIN_USE_LORA=${TRAIN_USE_LORA:-false}
+              TRAIN_MAX_STEPS=${TRAIN_MAX_STEPS:-200}
+
+              train-llm \
+                mode=train \
+                model.name=${MODEL_NAME} \
+                model.max_length=${MODEL_MAX_LENGTH} \
+                lora.target_modules=[${LORA_TARGET_MODULES}] \
+                train.batch_size=${TRAIN_BATCH_SIZE} \
+                train.num_epochs=${TRAIN_NUM_EPOCHS} \
+                train.lr=${TRAIN_LR} \
+                train.use_lora=${TRAIN_USE_LORA} \
+                train.data_dir=/data \
+                train.output_dir=/outputs/rank${ordinal} \
+                train.deepspeed_config_path=/config/deepspeed_zero2.json \
+                train.val_shard_template=val_shard_0 \
+                train.max_steps=${TRAIN_MAX_STEPS}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: outputs
+              mountPath: /outputs
+            - name: trainer-config
+              mountPath: /config
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: smirvaki-training-data
+        - name: outputs
+          persistentVolumeClaim:
+            claimName: smirvaki-training-outputs
+        - name: trainer-config
+          configMap:
+            name: smirvaki-trainer-configs

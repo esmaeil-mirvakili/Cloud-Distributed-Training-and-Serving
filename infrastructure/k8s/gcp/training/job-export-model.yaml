@@ -1,0 +1,53 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: smirvaki-export-model
+  namespace: llm-training
+spec:
+  template:
+    metadata:
+      labels:
+        app: smirvaki-export-model
+    spec:
+      restartPolicy: Never
+      tolerations:
+        - key: "cloud.google.com/gke-quick-remove"
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
+      containers:
+        - name: gcs-sync
+          image: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: GCS_BUCKET_URI
+              value: gs://llmtrainingserving-training-data
+          resources:
+            limits:
+              cpu: "1"
+              memory: 1Gi
+            requests:
+              cpu: "1"
+              memory: 1Gi
+          command:
+            - /bin/bash
+            - -lc
+            - |
+              set -euo pipefail
+              : "${GCS_BUCKET_URI:?GCS_BUCKET_URI env is required (e.g. gs://bucket/path)}"
+              if [ ! -d /outputs ]; then
+                echo "/outputs mount is missing" >&2
+                exit 1
+              fi
+              ts="$(date -u +%Y%m%dT%H%M%SZ)"
+              target="${GCS_BUCKET_URI%/}/run-${ts}"
+              echo "Syncing /outputs to ${target}"
+              gsutil -m rsync -r /outputs/ "${target}/"
+              echo "Upload complete"
+          volumeMounts:
+            - name: outputs
+              mountPath: /outputs
+      volumes:
+        - name: outputs
+          persistentVolumeClaim:
+            claimName: smirvaki-training-outputs

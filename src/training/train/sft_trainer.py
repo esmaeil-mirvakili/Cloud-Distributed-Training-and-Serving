@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import glob
 import math
 import os
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List, Tuple
 
 import deepspeed
 import torch
+from datasets import concatenate_datasets
 from loguru import logger
 from torch.optim import AdamW
 from transformers import get_linear_schedule_with_warmup
@@ -65,10 +67,14 @@ class SFTTrainer(BaseTrainer):
                 raise ValueError(
                     "Distributed training requires train.deepspeed_config_path to be set"
                 )
+            optimizer = self.build_optimizer(model)
+            scheduler = self.build_scheduler(optimizer)
             optimizer_params = self._build_optimizer_param_groups(model)
             engine, optimizer, _, scheduler = deepspeed.initialize(
                 model=model,
                 model_parameters=optimizer_params,
+                optimizer=optimizer,
+                lr_scheduler=scheduler,
                 config=self.ds_config,
             )
             self.model = engine
@@ -89,18 +95,21 @@ class SFTTrainer(BaseTrainer):
         return self._default_build_model()
 
     def build_train_dataloader(self):
-        shard_path, shard_name = self._resolve_shard(
-            self.cfg.train_shard_template, "train"
-        )
+        shard_infos = self._resolve_train_shards(self.cfg.train_shard_template)
         if self.is_main_process:
             logger.info(
-                "[rank {}/{}] Loading shard {} from {}",
+                "[rank {}/{}] Loading train shards {} from {}",
                 self.rank,
                 self.world_size,
-                shard_name,
+                [name for _, name in shard_infos],
                 self.cfg.data_dir,
             )
-        dataset = load_sharded_dataset(shard_path)
+        datasets = [load_sharded_dataset(path) for path, _ in shard_infos]
+        if len(datasets) == 1:
+            dataset = datasets[0]
+        else:
+            dataset = concatenate_datasets(datasets)
+            dataset.set_format(type="torch")
         return get_dataloader(dataset, batch_size=self.cfg.batch_size)
 
     def build_val_dataloader(self):
@@ -240,8 +249,9 @@ class SFTTrainer(BaseTrainer):
         perplexity_value = math.exp(min(loss_value, 20))
         grad_norm = self._last_grad_norm
         tokens = self._current_token_count
-        steps_ps = 1.0 / duration if duration > 0 else 0.0
-        tokens_ps = tokens / duration if duration > 0 else 0.0
+        world = max(1, self.world_size)
+        steps_ps = (1.0 / duration if duration > 0 else 0.0) * world
+        tokens_ps = (tokens / duration if duration > 0 else 0.0) * world
 
         training_loss.set(loss_value)
         training_perplexity.set(perplexity_value)
@@ -306,6 +316,41 @@ class SFTTrainer(BaseTrainer):
             )
         self._shard_name = shard_name
         return shard_path, shard_name
+
+    def _resolve_train_shards(self, template: str) -> List[Tuple[str, str]]:
+        """
+        Return all shard paths assigned to this rank (shard_i where i % world_size == rank).
+        Requires the template to include {id} so we can glob shard indices.
+        """
+        if "{id}" not in template:
+            # Fall back to single-shard behavior if template lacks {id}
+            shard_path, shard_name = self._resolve_shard(template, "train")
+            return [(shard_path, shard_name)]
+
+        pattern = template.format(id="*")
+        search_glob = os.path.join(self.cfg.data_dir, pattern)
+        shard_paths = sorted(glob.glob(search_glob))
+        if not shard_paths:
+            raise FileNotFoundError(
+                f"No train shards found matching pattern '{pattern}' in {self.cfg.data_dir}"
+            )
+
+        assigned: List[Tuple[str, str]] = []
+        for path in shard_paths:
+            name = os.path.basename(path)
+            try:
+                idx = int(name.rsplit("_", 1)[-1])
+            except ValueError:
+                continue
+            if idx % max(1, self.world_size) == self.rank:
+                assigned.append((path, name))
+
+        if not assigned:
+            raise FileNotFoundError(
+                f"No train shards assigned to rank {self.rank} (world_size={self.world_size}) "
+                f"using pattern '{pattern}'."
+            )
+        return assigned
 
     def _total_training_steps(self) -> int:
         if self.train_dataloader is None:

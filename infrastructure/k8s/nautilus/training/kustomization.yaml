@@ -1,0 +1,20 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: cse239fall2025
+
+resources:
+  - service-training.yaml
+  - statefulset-training.yaml
+  - prometheus-deployment.yaml
+  - grafana-deployment.yaml
+
+configMapGenerator:
+  - name: smirvaki-trainer-configs
+    files:
+      - deepspeed_zero2.json=deepspeed_zero2.json
+  - name: training-params
+    envs:
+      - training.env
+
+generatorOptions:
+  disableNameSuffixHash: true

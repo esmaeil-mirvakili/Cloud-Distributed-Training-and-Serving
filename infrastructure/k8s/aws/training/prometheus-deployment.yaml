@@ -1,0 +1,106 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: smirvaki-prometheus-config
+  namespace: llm-training
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 5s
+      evaluation_interval: 10s
+    scrape_configs:
+      - job_name: 'trainer'
+        static_configs:
+          - targets:
+              - smirvaki-trainer-0.smirvaki-trainer.llm-training.svc.cluster.local:8000
+              - smirvaki-trainer-1.smirvaki-trainer.llm-training.svc.cluster.local:8000
+              - smirvaki-trainer-2.smirvaki-trainer.llm-training.svc.cluster.local:8000
+              - smirvaki-trainer-3.smirvaki-trainer.llm-training.svc.cluster.local:8000
+              - smirvaki-trainer-4.smirvaki-trainer.llm-training.svc.cluster.local:8000
+              - smirvaki-trainer-5.smirvaki-trainer.llm-training.svc.cluster.local:8000
+              - smirvaki-trainer-6.smirvaki-trainer.llm-training.svc.cluster.local:8000
+              - smirvaki-trainer-7.smirvaki-trainer.llm-training.svc.cluster.local:8000
+      - job_name: 'prometheus'
+        static_configs:
+          - targets: ['localhost:9090']
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: smirvaki-prometheus
+  namespace: llm-training
+  labels:
+    app: smirvaki-prometheus
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: smirvaki-prometheus
+  template:
+    metadata:
+      labels:
+        app: smirvaki-prometheus
+    spec:
+      securityContext:
+        fsGroup: 65534
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: k8s.amazonaws.com/accelerator
+                    operator: DoesNotExist
+      initContainers:
+        - name: init-perms
+          image: busybox:1.36
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+            runAsNonRoot: false
+          command: ["sh", "-c", "chown -R 65534:65534 /prometheus"]
+          volumeMounts:
+            - name: data
+              mountPath: /prometheus
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v2.52.0
+          imagePullPolicy: IfNotPresent
+          resources:
+            requests:
+              cpu: "250m"
+              memory: 512Mi
+            limits:
+              cpu: "750m"
+              memory: 1500Mi
+          args:
+            - "--config.file=/etc/prometheus/prometheus.yml"
+            - "--storage.tsdb.path=/prometheus"
+            - "--web.enable-lifecycle"
+          ports:
+            - containerPort: 9090
+              name: http
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus
+            - name: data
+              mountPath: /prometheus
+      volumes:
+        - name: config
+          configMap:
+            name: smirvaki-prometheus-config
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: smirvaki-prometheus
+  namespace: llm-training
+spec:
+  selector:
+    app: smirvaki-prometheus
+  ports:
+    - name: http
+      port: 9090
+      targetPort: 9090

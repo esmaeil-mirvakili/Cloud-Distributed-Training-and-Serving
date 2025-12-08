@@ -1,0 +1,170 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: smirvaki-grafana-admin
+  namespace: llm-training
+type: Opaque
+stringData:
+  admin-user: admin
+  admin-password: changeme
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: smirvaki-grafana-datasources
+  namespace: llm-training
+data:
+  prometheus.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        access: proxy
+        url: http://smirvaki-prometheus:9090
+        isDefault: true
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: smirvaki-grafana-dashboards
+  namespace: llm-training
+data:
+  dashboards.yaml: |
+    apiVersion: 1
+    providers:
+      - name: default
+        orgId: 1
+        type: file
+        updateIntervalSeconds: 30
+        options:
+          path: /var/lib/grafana/dashboards
+  dash.json: |
+    {
+      "id": null,
+      "uid": "training-metrics",
+      "title": "Training Metrics",
+      "schemaVersion": 39,
+      "version": 1,
+      "tags": ["training"],
+      "panels": [
+        {
+          "type": "graph",
+          "title": "Train Loss",
+          "targets": [
+            {
+              "expr": "training_loss",
+              "legendFormat": "train_loss"
+            }
+          ]
+        },
+        {
+          "type": "graph",
+          "title": "Steps per Second",
+          "targets": [
+            {
+              "expr": "steps_per_second",
+              "legendFormat": "sps"
+            }
+          ]
+        },
+        {
+          "type": "graph",
+          "title": "Tokens per Second",
+          "targets": [
+            {
+              "expr": "tokens_per_second",
+              "legendFormat": "tps"
+            }
+          ]
+        }
+      ]
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: smirvaki-grafana
+  namespace: llm-training
+  labels:
+    app: smirvaki-grafana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: smirvaki-grafana
+  template:
+    metadata:
+      labels:
+        app: smirvaki-grafana
+    spec:
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: k8s.amazonaws.com/accelerator
+                    operator: DoesNotExist
+      containers:
+        - name: grafana
+          image: grafana/grafana:11.2.0
+          imagePullPolicy: IfNotPresent
+          resources:
+            requests:
+              cpu: "250m"
+              memory: 512Mi
+            limits:
+              cpu: "500m"
+              memory: 1Gi
+          env:
+            - name: GF_SECURITY_ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: smirvaki-grafana-admin
+                  key: admin-user
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: smirvaki-grafana-admin
+                  key: admin-password
+            - name: GF_AUTH_ANONYMOUS_ENABLED
+              value: "false"
+          ports:
+            - name: http
+              containerPort: 3000
+          volumeMounts:
+            - name: datasources
+              mountPath: /etc/grafana/provisioning/datasources
+            - name: dashboards
+              mountPath: /etc/grafana/provisioning/dashboards
+            - name: dashboards-json
+              mountPath: /var/lib/grafana/dashboards
+      volumes:
+        - name: datasources
+          configMap:
+            name: smirvaki-grafana-datasources
+        - name: dashboards
+          configMap:
+            name: smirvaki-grafana-dashboards
+            items:
+              - key: dashboards.yaml
+                path: dashboards.yaml
+        - name: dashboards-json
+          configMap:
+            name: smirvaki-grafana-dashboards
+            items:
+              - key: dash.json
+                path: dash.json
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: smirvaki-grafana
+  namespace: llm-training
+spec:
+  selector:
+    app: smirvaki-grafana
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000

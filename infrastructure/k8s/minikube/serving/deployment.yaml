@@ -1,0 +1,133 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: smirvaki-llama-serving
+  namespace: llm-serving
+  labels:
+    app: smirvaki-llama-serving
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: smirvaki-llama-serving
+  template:
+    metadata:
+      labels:
+        app: smirvaki-llama-serving
+    spec:
+      initContainers:
+        - name: wait-for-model
+          image: alpine:3.19
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              echo "Waiting for model at ${LLAMA_MODEL_PATH}..."
+              until [ -f "${LLAMA_MODEL_PATH}" ]; do
+                echo "Model not found, sleeping 10s..."
+                sleep 10
+              done
+              echo "Model found."
+          env:
+            - name: LLAMA_MODEL_PATH
+              valueFrom:
+                configMapKeyRef:
+                  name: smirvaki-llama-model-config
+                  key: LLAMA_MODEL_PATH
+          volumeMounts:
+            - name: model-storage
+              mountPath: /models
+      containers:
+        - name: api
+          image: docker.io/esmaeilmirvakili/llama-serving:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: LLAMA_MODEL_PATH
+              valueFrom:
+                configMapKeyRef:
+                  name: smirvaki-llama-model-config
+                  key: LLAMA_MODEL_PATH
+            - name: HF_MODEL_REPO
+              valueFrom:
+                configMapKeyRef:
+                  name: smirvaki-llama-model-config
+                  key: HF_MODEL_REPO
+            - name: LLAMA_THREADS
+              valueFrom:
+                configMapKeyRef:
+                  name: smirvaki-llama-model-config
+                  key: LLAMA_THREADS
+            - name: LLAMA_CONTEXT
+              valueFrom:
+                configMapKeyRef:
+                  name: smirvaki-llama-model-config
+                  key: LLAMA_CONTEXT
+            - name: LLAMA_GPU_LAYERS
+              valueFrom:
+                configMapKeyRef:
+                  name: smirvaki-llama-model-config
+                  key: LLAMA_GPU_LAYERS
+            - name: LLAMA_BATCH
+              valueFrom:
+                configMapKeyRef:
+                  name: smirvaki-llama-model-config
+                  key: LLAMA_BATCH
+            - name: LLAMA_BACKEND
+              valueFrom:
+                configMapKeyRef:
+                  name: smirvaki-llama-model-config
+                  key: LLAMA_BACKEND
+            - name: LLAMA_SERVER_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: smirvaki-llama-model-config
+                  key: LLAMA_SERVER_URL
+            - name: LLAMA_SERVER_TIMEOUT
+              valueFrom:
+                configMapKeyRef:
+                  name: smirvaki-llama-model-config
+                  key: LLAMA_SERVER_TIMEOUT
+            - name: UVICORN_WORKERS
+              valueFrom:
+                configMapKeyRef:
+                  name: smirvaki-llama-model-config
+                  key: UVICORN_WORKERS
+          ports:
+            - containerPort: 8001
+              name: api
+          volumeMounts:
+            - name: model-storage
+              mountPath: /models
+          resources:
+            requests:
+              cpu: "2"
+              memory: "2Gi"
+            limits:
+              cpu: "4"
+              memory: "4Gi"
+        - name: nginx
+          image: nginx:1.25
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+              name: nginx
+          volumeMounts:
+            - name: nginx-config
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "96Mi"
+            limits:
+              cpu: "200m"
+              memory: "192Mi"
+      volumes:
+        - name: model-storage
+          persistentVolumeClaim:
+            claimName: smirvaki-llama-model-pvc
+        - name: nginx-config
+          configMap:
+            name: smirvaki-llama-nginx

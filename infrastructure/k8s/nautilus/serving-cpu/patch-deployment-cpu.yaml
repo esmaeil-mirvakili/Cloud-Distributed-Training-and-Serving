@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: smirvaki-llama-serving
+  namespace: cse239fall2025
+spec:
+  template:
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: nvidia.com/gpu
+                    operator: DoesNotExist
+      containers:
+        - name: api
+          resources:
+            requests:
+              nvidia.com/gpu: null
+            limits:
+              nvidia.com/gpu: null

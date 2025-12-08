@@ -3,7 +3,6 @@ from typing import Optional, Tuple
 import os, math, shutil, random
 from datasets import load_dataset, Dataset, load_from_disk, DatasetDict
 from loguru import logger
-from torch.utils.data import DataLoader
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
 from training.formatting import ExampleFormatter
 
@@ -62,7 +61,6 @@ def tokenize_dataset(
         remove_columns=ds.column_names,
         desc="Tokenizing dataset",
     )
-    tokenized.set_format(type="torch")
     return tokenized
 
 
@@ -76,8 +74,11 @@ def shard_dataset(ds: Dataset, num_shards: int, shard_id: int) -> Dataset:
 
 
 def get_dataloader(
-    tokenized: Dataset, batch_size: int, shuffle: bool = True, num_workers: int = 2
+    tokenized: Dataset, batch_size: int, shuffle: bool = True, num_workers: int = 1
 ) -> DataLoader:
+    from torch.utils.data import DataLoader
+
+    # Keep worker count low to avoid spawn deadlocks/stalls on shared filesystems.
     return DataLoader(
         tokenized, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers
     )

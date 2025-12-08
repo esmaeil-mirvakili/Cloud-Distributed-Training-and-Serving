@@ -1,0 +1,35 @@
+FROM python:3.10-slim
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    HF_HOME=/opt/hf_cache \
+    TOKENIZERS_PARALLELISM=false
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY pyproject.toml ./
+COPY src ./src
+
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir \
+         transformers \
+         datasets \
+         pyyaml \
+         hydra-core \
+         loguru \
+         psutil \
+         prometheus-client \
+         s3cmd \
+    && pip install --no-cache-dir --no-deps . \
+    && rm -rf /root/.cache/pip
+
+RUN mkdir -p ${HF_HOME}
+
+CMD ["train-llm"]

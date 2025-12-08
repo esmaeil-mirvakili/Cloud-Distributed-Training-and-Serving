@@ -1,0 +1,77 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: smirvaki-export-model
+  namespace: cse239fall2025
+spec:
+  template:
+    metadata:
+      labels:
+        app: smirvaki-export-model
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: s3-sync
+          image: python:3.11-slim
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: nautilus-s3-credentials
+                  key: access_key
+            - name: S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: nautilus-s3-credentials
+                  key: secret_key
+            - name: S3_BUCKET_URI
+              value: s3://smirvaki-training-data
+            - name: S3_HOST_BASE
+              value: http://rook-ceph-rgw-nautiluss3.rook
+            - name: S3_HOST_BUCKET
+              value: http://rook-ceph-rgw-nautiluss3.rook
+          resources:
+            limits:
+              cpu: "1"
+              memory: 1Gi
+            requests:
+              cpu: "1"
+              memory: 1Gi
+          command:
+            - /bin/bash
+            - -lc
+            - |
+              set -euo pipefail
+              apt-get update && apt-get install -y --no-install-recommends s3cmd ca-certificates && rm -rf /var/lib/apt/lists/*
+              : "${S3_ACCESS_KEY:?S3_ACCESS_KEY env is required}"
+              : "${S3_SECRET_KEY:?S3_SECRET_KEY env is required}"
+              : "${S3_BUCKET_URI:?S3_BUCKET_URI env is required (e.g. s3://bucket/path)}"
+              : "${S3_HOST_BASE:?S3_HOST_BASE env is required}"
+              : "${S3_HOST_BUCKET:?S3_HOST_BUCKET env is required}"
+              mkdir -p "${HOME}"
+              {
+                echo "[default]"
+                echo "access_key = ${S3_ACCESS_KEY}"
+                echo "secret_key = ${S3_SECRET_KEY}"
+                echo "host_base = ${S3_HOST_BASE}"
+                echo "host_bucket = ${S3_HOST_BUCKET}"
+                echo "use_https = False"
+                echo "signature_v2 = True"
+              } > "${HOME}/.s3cfg"
+              if [ ! -d /outputs ]; then
+                echo "/outputs mount is missing" >&2
+                exit 1
+              fi
+              ts="$(date -u +%Y%m%dT%H%M%SZ)"
+              target="${S3_BUCKET_URI%/}/run-${ts}"
+              echo "Syncing /outputs to ${target}"
+              s3cmd sync /outputs/ "${target}/"
+              echo "Upload complete"
+          volumeMounts:
+            - name: outputs
+              mountPath: /outputs
+      volumes:
+        - name: outputs
+          persistentVolumeClaim:
+            claimName: smirvaki-training-outputs

@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: smirvaki-llama-serving
+  namespace: cse239fall2025
+  labels:
+    app: smirvaki-llama-serving
+spec:
+  selector:
+    app: smirvaki-llama-serving
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8000
+    - name: llama-metrics
+      port: 2112
+      targetPort: 8001

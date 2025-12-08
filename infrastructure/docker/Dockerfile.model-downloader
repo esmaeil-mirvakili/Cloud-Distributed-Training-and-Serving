@@ -1,0 +1,19 @@
+# Lightweight image to run the model download helper.
+# Includes huggingface_hub (huggingface-cli).
+
+FROM python:3.11-slim
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir huggingface_hub
+
+WORKDIR /workspace
+
+COPY scripts ./scripts
+
+ENTRYPOINT ["/bin/bash", "-lc"]
+CMD ["./scripts/download_llama_model.sh"]

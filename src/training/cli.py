@@ -104,6 +104,7 @@ def _run_train(cfg: DictConfig) -> None:
         optimizer_builder=optimizer_builder,
         scheduler_builder=scheduler_builder,
         metrics_logger=metrics_logger,
+        log_every_n_steps=cfg.train.get("log_every_n_steps", None),
     )
     run_training(train_cfg)
 

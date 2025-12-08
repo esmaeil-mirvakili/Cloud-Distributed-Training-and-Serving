@@ -26,7 +26,8 @@ class BaseTrainer(ABC):
         self.gradient_accumulation_steps: int = int(
             self.config.get("gradient_accumulation_steps", 1)
         )
-        self.log_every_n_steps: int = int(self.config.get("log_every_n_steps", 50))
+        log_every = self.config.get("log_every_n_steps", 50)
+        self.log_every_n_steps: int = int(log_every) if log_every is not None else 50
         self.val_every_n_steps: Optional[int] = self.config.get(
             "val_every_n_steps", None
         )

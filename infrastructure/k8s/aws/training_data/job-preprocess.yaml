@@ -1,0 +1,79 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: smirvaki-preprocess-shards
+  namespace: llm-training
+spec:
+  template:
+    metadata:
+      labels:
+        app: smirvaki-preprocess-shards
+    spec:
+      serviceAccountName: smirvaki-trainer
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: k8s.amazonaws.com/accelerator
+                    operator: DoesNotExist
+      restartPolicy: Never
+      containers:
+        - name: preprocess
+          image: docker.io/esmaeilmirvakili/training_preprocess:latest
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: training-params
+          env:
+            - name: HF_HOME
+              value: /opt/hf_cache
+            - name: TOKENIZERS_PARALLELISM
+              value: "false"
+            - name: S3_DATA_PREFIX
+              valueFrom:
+                configMapKeyRef:
+                  name: training-params
+                  key: S3_DATA_PREFIX
+                  optional: true
+            - name: AWS_DEFAULT_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: training-params
+                  key: AWS_REGION
+                  optional: true
+          resources:
+            requests:
+              cpu: "500m"
+              memory: 1Gi
+            limits:
+              cpu: "1"
+              memory: 2Gi
+          command:
+            - /bin/bash
+            - -lc
+            - |
+              set -euo pipefail
+              : "${S3_DATA_PREFIX:?S3_DATA_PREFIX env is required (e.g. s3://bucket/path/data)}"
+              python -m pip install --quiet awscli
+              TRAIN_SHARDS=${PREPROCESS_TRAIN_SHARDS:-3}
+              VAL_SHARDS=${PREPROCESS_VAL_SHARDS:-1}
+              train-llm \
+                mode=preprocess \
+                dataset.name=${DATASET_NAME:-databricks/databricks-dolly-15k} \
+                dataset.split=train \
+                preprocess.output_dir=/data \
+                preprocess.train.num_shards=${TRAIN_SHARDS} \
+                preprocess.val.num_shards=${VAL_SHARDS} \
+                preprocess.val_split_ratio=0.1 \
+                model.name=${MODEL_NAME:-gpt2} \
+                model.max_length=${MODEL_MAX_LENGTH:-512}
+              echo "Syncing shards to ${S3_DATA_PREFIX}"
+              aws s3 sync /data/ "${S3_DATA_PREFIX%/}/" --only-show-errors
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          emptyDir: {}

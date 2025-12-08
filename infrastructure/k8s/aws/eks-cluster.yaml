@@ -1,0 +1,24 @@
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+metadata:
+  name: llm-training-serving
+  region: us-east-1
+  version: "1.32"
+managedNodeGroups:
+  - name: base
+    instanceType: t3.xlarge
+    desiredCapacity: 5
+    minSize: 5
+    maxSize: 16
+    privateNetworking: true
+  - name: gpu
+    instanceType: g5.xlarge
+    desiredCapacity: 1
+    minSize: 1
+    maxSize: 8
+    privateNetworking: true
+    labels: { role: gpu }
+    taints:
+      - key: nvidia.com/gpu
+        value: "true"
+        effect: NoSchedule

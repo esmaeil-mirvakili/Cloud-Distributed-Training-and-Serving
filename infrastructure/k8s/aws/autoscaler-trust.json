@@ -1,0 +1,16 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": {
+      "Federated": "arn:aws:iam::471112859937:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/A440EEB650F31F426B54C44FE747327D"
+    },
+    "Action": "sts:AssumeRoleWithWebIdentity",
+    "Condition": {
+      "StringEquals": {
+        "oidc.eks.us-east-1.amazonaws.com/id/A440EEB650F31F426B54C44FE747327D:sub": "system:serviceaccount:kube-system:cluster-autoscaler",
+        "oidc.eks.us-east-1.amazonaws.com/id/A440EEB650F31F426B54C44FE747327D:aud": "sts.amazonaws.com"
+      }
+    }
+  }]
+}

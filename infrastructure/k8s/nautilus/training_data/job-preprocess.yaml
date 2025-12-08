@@ -1,0 +1,62 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: smirvaki-preprocess-shards
+  namespace: cse239fall2025
+spec:
+  template:
+    metadata:
+      labels:
+        app: smirvaki-preprocess-shards
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: nvidia.com/gpu
+                    operator: DoesNotExist
+      restartPolicy: Never
+      containers:
+        - name: preprocess
+          image: docker.io/esmaeilmirvakili/training_preprocess:latest
+          imagePullPolicy: Always
+          envFrom:
+            - configMapRef:
+                name: training-params
+          env:
+            - name: HF_HOME
+              value: /opt/hf_cache
+            - name: TOKENIZERS_PARALLELISM
+              value: "false"
+          resources:
+            limits:
+              cpu: 1
+              memory: 1Gi
+            requests:
+              cpu: 1
+              memory: 1Gi
+          command:
+            - /bin/bash
+            - -lc
+            - |
+              set -euo pipefail
+              TRAIN_SHARDS=${PREPROCESS_TRAIN_SHARDS:-3}
+              VAL_SHARDS=${PREPROCESS_VAL_SHARDS:-1}
+              train-llm \
+                mode=preprocess \
+                dataset.name=${DATASET_NAME:-databricks/databricks-dolly-15k} \
+                dataset.split=train \
+                preprocess.output_dir=/data \
+                preprocess.train.num_shards=${TRAIN_SHARDS} \
+                preprocess.val.num_shards=${VAL_SHARDS} \
+                preprocess.val_split_ratio=0.1 \
+                model.name=${MODEL_NAME:-gpt2} \
+                model.max_length=${MODEL_MAX_LENGTH:-512}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: smirvaki-training-data

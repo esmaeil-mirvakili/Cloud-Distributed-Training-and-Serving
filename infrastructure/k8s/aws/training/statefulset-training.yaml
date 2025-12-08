@@ -1,0 +1,140 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: smirvaki-trainer
+  namespace: llm-training
+spec:
+  podManagementPolicy: Parallel
+  serviceName: smirvaki-trainer
+  replicas: 1
+  selector:
+    matchLabels:
+      app: smirvaki-trainer
+  template:
+    metadata:
+      labels:
+        app: smirvaki-trainer
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: smirvaki-trainer
+      restartPolicy: Always
+      initContainers:
+        - name: wait-for-prometheus
+          image: curlimages/curl:8.4.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              echo "Waiting for Prometheus at http://smirvaki-prometheus:9090/-/healthy"
+              until curl -sf --max-time 2 http://smirvaki-prometheus:9090/-/healthy; do
+                echo "Prometheus not ready, retrying..."
+                sleep 5
+              done
+              echo "Prometheus reachable, proceeding."
+      tolerations:
+        - key: "nvidia.com/gpu"
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: trainer
+          image: docker.io/esmaeilmirvakili/training_stack:latest
+          imagePullPolicy: IfNotPresent
+          resources:
+            requests:
+              cpu: "2"
+              memory: 8Gi
+              nvidia.com/gpu: 1
+            limits:
+              cpu: "4"
+              memory: 16Gi
+              nvidia.com/gpu: 1
+          envFrom:
+            - configMapRef:
+                name: training-params
+          env:
+            - name: HF_HOME
+              value: /opt/hf_cache
+            - name: TOKENIZERS_PARALLELISM
+              value: "false"
+            - name: AWS_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: training-params
+                  key: AWS_REGION
+                  optional: true
+            - name: S3_DATA_PREFIX
+              valueFrom:
+                configMapKeyRef:
+                  name: training-params
+                  key: S3_DATA_PREFIX
+                  optional: true
+            - name: S3_OUTPUT_PREFIX
+              valueFrom:
+                configMapKeyRef:
+                  name: training-params
+                  key: S3_OUTPUT_PREFIX
+                  optional: true
+          command:
+            - /bin/bash
+            - -lc
+            - |
+              set -euo pipefail
+              ordinal=${HOSTNAME##*-}
+              export RANK=${ordinal}
+              export WORLD_SIZE=${TRAINER_REPLICAS:-1}
+              export LOCAL_RANK=0
+              export MASTER_ADDR=smirvaki-trainer-0.smirvaki-trainer.llm-training.svc.cluster.local
+              export MASTER_PORT=6100
+              export HYDRA_FULL_ERROR=1
+              : "${S3_DATA_PREFIX:?S3_DATA_PREFIX env is required (e.g. s3://bucket/path/data)}"
+              : "${S3_OUTPUT_PREFIX:?S3_OUTPUT_PREFIX env is required (e.g. s3://bucket/path/outputs)}"
+              python -m pip install --quiet awscli
+
+              MODEL_NAME=${MODEL_NAME:-gpt2}
+              MODEL_MAX_LENGTH=${MODEL_MAX_LENGTH:-512}
+              LORA_TARGET_MODULES=${LORA_TARGET_MODULES:-q_proj,v_proj}
+              TRAIN_BATCH_SIZE=${TRAIN_BATCH_SIZE:-4}
+              TRAIN_NUM_EPOCHS=${TRAIN_NUM_EPOCHS:-1}
+              TRAIN_LR=${TRAIN_LR:-5e-5}
+              TRAIN_USE_LORA=${TRAIN_USE_LORA:-false}
+              TRAIN_MAX_STEPS=${TRAIN_MAX_STEPS:-200}
+
+              echo "Syncing shards from ${S3_DATA_PREFIX} to /data"
+              aws s3 sync "${S3_DATA_PREFIX%/}/" /data --only-show-errors
+
+              train-llm \
+                mode=train \
+                model.name=${MODEL_NAME} \
+                model.max_length=${MODEL_MAX_LENGTH} \
+                lora.target_modules=[${LORA_TARGET_MODULES}] \
+                train.batch_size=${TRAIN_BATCH_SIZE} \
+                train.num_epochs=${TRAIN_NUM_EPOCHS} \
+                train.lr=${TRAIN_LR} \
+                train.use_lora=${TRAIN_USE_LORA} \
+                train.data_dir=/data \
+                train.output_dir=/outputs/rank${ordinal} \
+                train.deepspeed_config_path=/config/deepspeed_zero2.json \
+                train.val_shard_template=val_shard_0 \
+                train.max_steps=${TRAIN_MAX_STEPS}
+              echo "Syncing outputs to ${S3_OUTPUT_PREFIX}/rank${ordinal}"
+              aws s3 sync /outputs "${S3_OUTPUT_PREFIX%/}/rank${ordinal}/" --only-show-errors
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: outputs
+              mountPath: /outputs
+            - name: trainer-config
+              mountPath: /config
+      volumes:
+        - name: data
+          emptyDir: {}
+        - name: outputs
+          emptyDir: {}
+        - name: trainer-config
+          configMap:
+            name: smirvaki-trainer-configs

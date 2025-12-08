@@ -46,7 +46,7 @@ preprocess:
 
 train:
   data_dir: data
-  train_shard_template: shard_{rank}
+  train_shard_template: shard_{id}
   val_shard_template: null
   trainer_class: training.train.sft_trainer.SFTTrainer
   model_builder: null

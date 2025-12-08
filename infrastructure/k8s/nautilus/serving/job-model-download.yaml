@@ -1,0 +1,58 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: smirvaki-llama-model-download
+  namespace: cse239fall2025
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: downloader
+          image: docker.io/esmaeilmirvakili/llama-model-downloader:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: LLAMA_MODEL_DIR
+              valueFrom:
+                configMapKeyRef:
+                  name: smirvaki-llama-model-config
+                  key: LLAMA_MODEL_DIR
+            - name: LLAMA_MODEL_PATH
+              valueFrom:
+                configMapKeyRef:
+                  name: smirvaki-llama-model-config
+                  key: LLAMA_MODEL_PATH
+            - name: HF_MODEL_REPO
+              valueFrom:
+                configMapKeyRef:
+                  name: smirvaki-llama-model-config
+                  key: HF_MODEL_REPO
+            - name: HF_MODEL_FILE
+              valueFrom:
+                configMapKeyRef:
+                  name: smirvaki-llama-model-config
+                  key: HF_MODEL_FILE
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: huggingface-token
+                  key: token
+                  optional: true
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1536Mi"
+            limits:
+              cpu: "600m"
+              memory: "1800Mi"
+          volumeMounts:
+            - name: model-storage
+              mountPath: /models
+          command:
+            - /bin/bash
+            - -lc
+            - ./scripts/download_llama_model.sh
+      volumes:
+        - name: model-storage
+          persistentVolumeClaim:
+            claimName: smirvaki-llama-model-pvc

@@ -30,7 +30,7 @@ def run_training(cfg: TrainConfig):
     )
     logger.info("Resolved training config:\n{}", json.dumps(asdict(cfg), indent=2))
 
-    if cfg.metrics_port:
+    if cfg.metrics_port and getattr(trainer, "is_main_process", True):
         logger.info("Starting metrics server on port {}", cfg.metrics_port)
         start_metrics_server(cfg.metrics_port)
 

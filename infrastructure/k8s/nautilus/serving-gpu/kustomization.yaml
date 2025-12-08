@@ -1,0 +1,12 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: cse239fall2025
+resources:
+  - ../serving
+configMapGenerator:
+  - name: smirvaki-llama-model-config
+    behavior: replace
+    envs:
+      - model-gpu.env
+patches:
+  - path: patch-deployment-gpu.yaml

@@ -1,0 +1,191 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: smirvaki-serving-grafana-admin
+  namespace: cse239fall2025
+type: Opaque
+stringData:
+  admin-user: admin
+  admin-password: changeme
+---
+# Grafana datasource pointing at the serving Prometheus
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: smirvaki-serving-grafana-datasources
+  namespace: cse239fall2025
+data:
+  prometheus.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        access: proxy
+        url: http://smirvaki-prometheus:9090
+        isDefault: true
+---
+# Serving dashboard
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: smirvaki-serving-grafana-dashboards
+  namespace: cse239fall2025
+data:
+  dashboards.yaml: |
+    apiVersion: 1
+    providers:
+      - name: default
+        orgId: 1
+        type: file
+        updateIntervalSeconds: 30
+        options:
+          path: /var/lib/grafana/dashboards
+  serving.json: |
+    {
+      "id": null,
+      "uid": "llama-serving",
+      "title": "Llama Serving",
+      "schemaVersion": 39,
+      "version": 1,
+      "tags": ["serving", "llama"],
+      "panels": [
+        {
+          "type": "stat",
+          "title": "Requests per Second",
+          "targets": [
+            { "expr": "sum(rate(llama_requests_total[5m]))", "legendFormat": "rps" }
+          ]
+        },
+        {
+          "type": "stat",
+          "title": "P95 Latency (s)",
+          "targets": [
+            { "expr": "histogram_quantile(0.95, sum(rate(llama_request_latency_seconds_bucket[5m])) by (le, route))", "legendFormat": "{{route}}" }
+          ]
+        },
+        {
+          "type": "stat",
+          "title": "P95 TTFT (s)",
+          "targets": [
+            { "expr": "histogram_quantile(0.95, sum(rate(llama_request_ttft_seconds_bucket[5m])) by (le, route))", "legendFormat": "{{route}}" }
+          ]
+        },
+        {
+          "type": "stat",
+          "title": "In-flight Requests",
+          "targets": [
+            { "expr": "sum(llama_inflight_requests)", "legendFormat": "inflight" }
+          ]
+        },
+        {
+          "type": "gauge",
+          "title": "CPU Utilization (%)",
+          "targets": [
+            { "expr": "avg(llama_cpu_utilization_percent)", "legendFormat": "cpu" }
+          ]
+        },
+        {
+          "type": "gauge",
+          "title": "GPU Utilization (%)",
+          "targets": [
+            { "expr": "avg(llama_gpu_utilization_percent)", "legendFormat": "gpu" }
+          ]
+        },
+        {
+          "type": "graph",
+          "title": "Tokens per Second",
+          "targets": [
+            { "expr": "sum(rate(llama_tokens_total{type=\"completion\"}[5m]))", "legendFormat": "completion" },
+            { "expr": "sum(rate(llama_tokens_total{type=\"prompt\"}[5m]))", "legendFormat": "prompt" }
+          ]
+        },
+        {
+          "type": "graph",
+          "title": "Request Status Rate",
+          "targets": [
+            { "expr": "sum by (status) (rate(llama_requests_total[5m]))", "legendFormat": "{{status}}" }
+          ]
+        }
+      ]
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: smirvaki-serving-grafana
+  namespace: cse239fall2025
+  labels:
+    app: smirvaki-serving-grafana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: smirvaki-serving-grafana
+  template:
+    metadata:
+      labels:
+        app: smirvaki-serving-grafana
+    spec:
+      containers:
+        - name: grafana
+          image: grafana/grafana:11.2.0
+          imagePullPolicy: IfNotPresent
+          resources:
+            requests:
+              cpu: "250m"
+              memory: 512Mi
+            limits:
+              cpu: "500m"
+              memory: 1Gi
+          env:
+            - name: GF_SECURITY_ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: smirvaki-serving-grafana-admin
+                  key: admin-user
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: smirvaki-serving-grafana-admin
+                  key: admin-password
+            - name: GF_AUTH_ANONYMOUS_ENABLED
+              value: "false"
+          ports:
+            - name: http
+              containerPort: 3000
+          volumeMounts:
+            - name: datasources
+              mountPath: /etc/grafana/provisioning/datasources
+            - name: dashboards
+              mountPath: /etc/grafana/provisioning/dashboards
+            - name: dashboards-json
+              mountPath: /var/lib/grafana/dashboards
+      volumes:
+        - name: datasources
+          configMap:
+            name: smirvaki-serving-grafana-datasources
+        - name: dashboards
+          configMap:
+            name: smirvaki-serving-grafana-dashboards
+            items:
+              - key: dashboards.yaml
+                path: dashboards.yaml
+        - name: dashboards-json
+          configMap:
+            name: smirvaki-serving-grafana-dashboards
+            items:
+              - key: serving.json
+                path: serving.json
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: smirvaki-serving-grafana
+  namespace: cse239fall2025
+spec:
+  selector:
+    app: smirvaki-serving-grafana
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000

@@ -1,0 +1,56 @@
+# Python-based llama.cpp serving image using llama-cpp-python bindings.
+FROM python:3.11-slim
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    CMAKE_ARGS="-DLLAMA_BLAS=ON -DLLAMA_BLAS_VENDOR=OpenBLAS" \
+    FORCE_CMAKE=1 \
+    LLAMA_MODEL_PATH=/models/model.gguf \
+    LLAMA_CPP_REPO=https://github.com/ggerganov/llama.cpp.git \
+    LLAMA_CPP_REF=master
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    cmake \
+    git \
+    libopenblas-dev \
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+RUN pip install --no-cache-dir \
+    "fastapi" \
+    "uvicorn[standard]" \
+    "prometheus-client" \
+    "httpx" \
+    "psutil" \
+    "nvidia-ml-py3" \
+    "llama-cpp-python==0.2.89"
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    libcurl4 \
+    libcurl4-openssl-dev
+
+WORKDIR /opt
+RUN git clone --depth 1 --branch ${LLAMA_CPP_REF} ${LLAMA_CPP_REPO} llama.cpp \
+    && cmake -S llama.cpp -B llama.cpp/build -DLLAMA_BUILD_SERVER=ON -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_METAL=OFF -DLLAMA_ACCELERATE=OFF -DLLAMA_CURL=OFF -DCMAKE_BUILD_TYPE=Release \
+    && cmake --build llama.cpp/build --config Release --target llama-server -j "$(nproc)" \
+    && ln -s /opt/llama.cpp/build/bin/llama-server /usr/local/bin/llama-server
+
+WORKDIR /app
+
+COPY src /app/src
+
+ENV PYTHONPATH=/app/src
+
+COPY infrastructure/docker/entrypoint.serving.sh /app/entrypoint.serving.sh
+RUN chmod +x /app/entrypoint.serving.sh
+
+USER 1000
+
+EXPOSE 8000
+
+ENTRYPOINT ["/app/entrypoint.serving.sh"]

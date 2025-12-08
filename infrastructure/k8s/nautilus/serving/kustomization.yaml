@@ -1,0 +1,18 @@
+resources:
+  - pvc-model.yaml
+  - job-model-download.yaml
+  - deployment.yaml
+  - service.yaml
+  - ingress.yaml
+  - nginx-config.yaml
+  - prometheus-deployment.yaml
+  - grafana-deployment.yaml
+  - hpa.yaml
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+configMapGenerator:
+  - name: smirvaki-llama-model-config
+    envs:
+      - model.env

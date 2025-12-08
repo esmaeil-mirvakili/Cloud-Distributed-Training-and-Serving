@@ -1,0 +1,85 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: smirvaki-llama-model-download
+  namespace: llm-training
+spec:
+  template:
+    spec:
+      serviceAccountName: smirvaki-trainer
+      restartPolicy: OnFailure
+      containers:
+        - name: downloader
+          image: amazon/aws-cli:2.17.40
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: LLAMA_MODEL_DIR
+              valueFrom:
+                configMapKeyRef:
+                  name: smirvaki-llama-model-config
+                  key: LLAMA_MODEL_DIR
+            - name: LLAMA_MODEL_PATH
+              valueFrom:
+                configMapKeyRef:
+                  name: smirvaki-llama-model-config
+                  key: LLAMA_MODEL_PATH
+            - name: S3_MODEL_PREFIX
+              valueFrom:
+                configMapKeyRef:
+                  name: smirvaki-llama-model-config
+                  key: S3_MODEL_PREFIX
+            - name: S3_MODEL_FILE
+              valueFrom:
+                configMapKeyRef:
+                  name: smirvaki-llama-model-config
+                  key: S3_MODEL_FILE
+                  optional: true
+            - name: HF_MODEL_REPO
+              valueFrom:
+                configMapKeyRef:
+                  name: smirvaki-llama-model-config
+                  key: HF_MODEL_REPO
+            - name: HF_MODEL_FILE
+              valueFrom:
+                configMapKeyRef:
+                  name: smirvaki-llama-model-config
+                  key: HF_MODEL_FILE
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: huggingface-token
+                  key: token
+                  optional: true
+          resources:
+            requests:
+              cpu: "500m"
+              memory: 1Gi
+            limits:
+              cpu: "1"
+              memory: 2Gi
+          command:
+            - /bin/bash
+            - -lc
+            - |
+              set -euo pipefail
+              : "${S3_MODEL_PREFIX:?S3_MODEL_PREFIX env is required (e.g. s3://bucket/model-dir)}"
+              : "${HF_MODEL_REPO:?HF_MODEL_REPO is required}"
+              : "${HF_MODEL_FILE:?HF_MODEL_FILE is required}"
+              mkdir -p "${LLAMA_MODEL_DIR}"
+              dest="${LLAMA_MODEL_PATH:-${LLAMA_MODEL_DIR%/}/${HF_MODEL_FILE}}"
+              url="https://huggingface.co/${HF_MODEL_REPO}/resolve/main/${HF_MODEL_FILE}"
+              echo "Downloading ${url} to ${dest}"
+              if [ -n "${HF_TOKEN:-}" ]; then
+                curl -L -H "Authorization: Bearer ${HF_TOKEN}" -o "${dest}" "${url}"
+              else
+                curl -L -o "${dest}" "${url}"
+              fi
+              echo "Uploading ${dest} to ${S3_MODEL_PREFIX}"
+              aws s3 cp "${dest}" "${S3_MODEL_PREFIX%/}/${S3_MODEL_FILE:-${HF_MODEL_FILE}}" --only-show-errors
+              ls -lh "${LLAMA_MODEL_DIR}"
+          volumeMounts:
+            - name: model-storage
+              mountPath: /models
+      volumes:
+        - name: model-storage
+          emptyDir: {}

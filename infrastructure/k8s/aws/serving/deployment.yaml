@@ -1,0 +1,166 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: smirvaki-llama-serving
+  namespace: llm-training
+  labels:
+    app: smirvaki-llama-serving
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: smirvaki-llama-serving
+  template:
+    metadata:
+      labels:
+        app: smirvaki-llama-serving
+    spec:
+      serviceAccountName: smirvaki-trainer
+      initContainers:
+        - name: wait-and-download-model
+          image: amazon/aws-cli:2.17.40
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: LLAMA_MODEL_DIR
+              valueFrom:
+                configMapKeyRef:
+                  name: smirvaki-llama-model-config
+                  key: LLAMA_MODEL_DIR
+            - name: LLAMA_MODEL_PATH
+              valueFrom:
+                configMapKeyRef:
+                  name: smirvaki-llama-model-config
+                  key: LLAMA_MODEL_PATH
+            - name: S3_MODEL_PREFIX
+              valueFrom:
+                configMapKeyRef:
+                  name: smirvaki-llama-model-config
+                  key: S3_MODEL_PREFIX
+            - name: S3_MODEL_FILE
+              valueFrom:
+                configMapKeyRef:
+                  name: smirvaki-llama-model-config
+                  key: S3_MODEL_FILE
+          command:
+            - /bin/bash
+            - -lc
+            - |
+              set -euo pipefail
+              : "${S3_MODEL_PREFIX:?S3_MODEL_PREFIX is required}"
+              : "${S3_MODEL_FILE:?S3_MODEL_FILE is required}"
+              url="${S3_MODEL_PREFIX%/}/${S3_MODEL_FILE}"
+              echo "Waiting for model object ${url}"
+              for i in $(seq 1 60); do
+                if aws s3 ls "${url}" >/dev/null 2>&1; then
+                  echo "Model found in S3"
+                  break
+                fi
+                echo "Model not in S3 yet, sleeping 10s..."
+                sleep 10
+              done
+              if ! aws s3 ls "${url}" >/dev/null 2>&1; then
+                echo "Model not found in S3 after waiting" >&2
+                exit 1
+              fi
+              mkdir -p "${LLAMA_MODEL_DIR}"
+              echo "Downloading model from ${url} to ${LLAMA_MODEL_PATH}"
+              aws s3 cp "${url}" "${LLAMA_MODEL_PATH}" --only-show-errors
+              ls -lh "${LLAMA_MODEL_DIR}"
+              if [ ! -f "${LLAMA_MODEL_PATH}" ]; then
+                echo "Model file ${LLAMA_MODEL_PATH} missing after download" >&2
+                exit 1
+              fi
+          volumeMounts:
+            - name: model-storage
+              mountPath: /models
+      containers:
+        - name: api
+          image: docker.io/esmaeilmirvakili/llama-serving:latest
+          imagePullPolicy: Always
+          env:
+            - name: LLAMA_MODEL_PATH
+              valueFrom:
+                configMapKeyRef:
+                  name: smirvaki-llama-model-config
+                  key: LLAMA_MODEL_PATH
+            - name: HF_MODEL_REPO
+              valueFrom:
+                configMapKeyRef:
+                  name: smirvaki-llama-model-config
+                  key: HF_MODEL_REPO
+            - name: LLAMA_THREADS
+              valueFrom:
+                configMapKeyRef:
+                  name: smirvaki-llama-model-config
+                  key: LLAMA_THREADS
+            - name: LLAMA_CONTEXT
+              valueFrom:
+                configMapKeyRef:
+                  name: smirvaki-llama-model-config
+                  key: LLAMA_CONTEXT
+            - name: LLAMA_GPU_LAYERS
+              valueFrom:
+                configMapKeyRef:
+                  name: smirvaki-llama-model-config
+                  key: LLAMA_GPU_LAYERS
+            - name: LLAMA_BATCH
+              valueFrom:
+                configMapKeyRef:
+                  name: smirvaki-llama-model-config
+                  key: LLAMA_BATCH
+            - name: LLAMA_BACKEND
+              valueFrom:
+                configMapKeyRef:
+                  name: smirvaki-llama-model-config
+                  key: LLAMA_BACKEND
+            - name: LLAMA_SERVER_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: smirvaki-llama-model-config
+                  key: LLAMA_SERVER_URL
+            - name: LLAMA_SERVER_TIMEOUT
+              valueFrom:
+                configMapKeyRef:
+                  name: smirvaki-llama-model-config
+                  key: LLAMA_SERVER_TIMEOUT
+            - name: UVICORN_WORKERS
+              valueFrom:
+                configMapKeyRef:
+                  name: smirvaki-llama-model-config
+                  key: UVICORN_WORKERS
+          ports:
+            - containerPort: 8001
+              name: api
+          volumeMounts:
+            - name: model-storage
+              mountPath: /models
+          resources:
+            requests:
+              cpu: "2"
+              memory: 8Gi
+            limits:
+              cpu: "4"
+              memory: 16Gi
+        - name: nginx
+          image: nginx:1.25
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+              name: nginx
+          volumeMounts:
+            - name: nginx-config
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+          resources:
+            requests:
+              cpu: "100m"
+              memory: 128Mi
+            limits:
+              cpu: "300m"
+              memory: 256Mi
+      volumes:
+        - name: model-storage
+          emptyDir: {}
+        - name: nginx-config
+          configMap:
+            name: smirvaki-llama-nginx

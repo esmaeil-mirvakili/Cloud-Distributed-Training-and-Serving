@@ -7,25 +7,25 @@ ENV DEBIAN_FRONTEND=noninteractive \
     TOKENIZERS_PARALLELISM=false \
     CUDA_HOME=/usr/local/cuda \
     PATH=/usr/local/cuda/bin:${PATH} \
-    LD_LIBRARY_PATH=/usr/local/cuda/lib64:${LD_LIBRARY_PATH}
+    LD_LIBRARY_PATH=/usr/local/cuda/lib64:${LD_LIBRARY_PATH} \
+    PIP_INDEX_URL=https://download.pytorch.org/whl/cu118 \
+    PIP_EXTRA_INDEX_URL=https://pypi.org/simple
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git \
     curl \
     ca-certificates \
-    build-essential \
-    ninja-build \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 COPY pyproject.toml ./
 
-RUN pip install --upgrade pip
+RUN pip install --no-cache-dir --upgrade pip
 
 COPY src ./src
 
-RUN pip install .
+RUN pip install --no-cache-dir .
+RUN rm -rf /root/.cache/pip
 
 RUN mkdir -p ${HF_HOME}
 
