@@ -11,6 +11,20 @@ SERVER_PORT="${LLAMA_SERVER_PORT:-8080}"
 UVICORN_WORKERS="${UVICORN_WORKERS:-2}"
 EXTRA_FLAGS="${LLAMA_SERVER_EXTRA_FLAGS:-}"
 
+WAIT_FOR_MODEL_TIMEOUT="${WAIT_FOR_MODEL_TIMEOUT:-600}"
+WAIT_FOR_MODEL_POLL="${WAIT_FOR_MODEL_POLL:-5}"
+
+echo "Waiting for model at ${MODEL} (timeout=${WAIT_FOR_MODEL_TIMEOUT}s, poll=${WAIT_FOR_MODEL_POLL}s)..."
+deadline=$((SECONDS + WAIT_FOR_MODEL_TIMEOUT))
+while [ ! -s "${MODEL}" ]; do
+  if [ "${SECONDS}" -ge "${deadline}" ]; then
+    echo "Model ${MODEL} not found after ${WAIT_FOR_MODEL_TIMEOUT}s" >&2
+    exit 1
+  fi
+  sleep "${WAIT_FOR_MODEL_POLL}"
+done
+echo "Model found: ${MODEL}"
+
 if [[ "${BACKEND}" == "server" ]]; then
   echo "Starting standalone llama-server (backend=server)..."
   /usr/local/bin/llama-server -m "${MODEL}" --host "${SERVER_HOST}" --port "${SERVER_PORT}" -c "${CTX}" -t "${THREADS}" --batch-size "${NBATCH}" ${EXTRA_FLAGS} &
