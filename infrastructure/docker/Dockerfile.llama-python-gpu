@@ -85,6 +85,15 @@ RUN pip install --no-cache-dir \
 # Bring in llama-server binary
 COPY --from=build /opt/llama.cpp/build/bin/llama-server /usr/local/bin/llama-server
 
+# Copy llama.cpp shared libraries required by llama-server (e.g., libmtmd.so.0)
+# Libraries are produced under build/bin, build/src and build/ggml/src.
+COPY --from=build /opt/llama.cpp/build/bin/ /opt/llama-libs/bin/
+COPY --from=build /opt/llama.cpp/build/src/ /opt/llama-libs/src/
+COPY --from=build /opt/llama.cpp/build/ggml/src/ /opt/llama-libs/ggml-src/
+
+# Ensure the dynamic loader can find the copied .so files at runtime
+ENV LD_LIBRARY_PATH=/opt/llama-libs/bin:/opt/llama-libs/src:/opt/llama-libs/ggml-src:${LD_LIBRARY_PATH}
+
 WORKDIR /app
 
 COPY src /app/src
