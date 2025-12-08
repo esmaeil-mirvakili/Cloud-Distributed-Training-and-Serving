@@ -14,6 +14,17 @@ spec:
           effect: NoSchedule
       containers:
         - name: api
+          image: docker.io/esmaeilmirvakili/llama-serving-gpu:latest
+          imagePullPolicy: Always
           env:
             - name: LLAMA_GPU_LAYERS
               value: "-1"
+          resources:
+            requests:
+              nvidia.com/gpu: "1"
+              cpu: "2"
+              memory: 8Gi
+            limits:
+              nvidia.com/gpu: "1"
+              cpu: "4"
+              memory: 16Gi

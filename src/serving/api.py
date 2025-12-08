@@ -142,7 +142,15 @@ def _init_gpu_handles() -> None:
         _gpu_handles.clear()
 
 
+def _ensure_gpu_handles() -> None:
+    # Try to lazily (re)initialize GPU handles in case NVML wasn't ready at import time.
+    if _gpu_handles:
+        return
+    _init_gpu_handles()
+
+
 def _refresh_gpu_metrics() -> None:
+    _ensure_gpu_handles()
     if not _gpu_handles:
         return
     for idx, handle in enumerate(_gpu_handles):

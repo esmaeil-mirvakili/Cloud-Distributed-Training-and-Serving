@@ -75,7 +75,7 @@ spec:
               mountPath: /models
       containers:
         - name: api
-          image: docker.io/esmaeilmirvakili/llama-serving-gpu:latest
+          image: docker.io/esmaeilmirvakili/llama-serving:latest
           imagePullPolicy: Always
           env:
             - name: LLAMA_MODEL_PATH
