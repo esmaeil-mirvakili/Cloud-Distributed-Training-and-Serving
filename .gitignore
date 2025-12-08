@@ -229,3 +229,5 @@ artifacts/
 # Misc
 .DS_Store
 data/
+
+.wildchat_quality_subset.jsonl

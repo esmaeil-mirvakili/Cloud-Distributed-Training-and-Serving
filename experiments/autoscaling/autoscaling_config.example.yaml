@@ -1,0 +1,169 @@
+cluster:
+  namespace: llm-training
+  context: ""
+  base_env_file: infrastructure/k8s/aws/serving/model.env
+  overlays:
+    cpu: infrastructure/k8s/aws/serving-cpu
+    gpu: infrastructure/k8s/aws/serving-gpu
+  service_name: smirvaki-llama-serving
+  service_port: 80
+  local_service_port: 18002
+  prometheus_service: smirvaki-prometheus
+  prometheus_port: 9090
+  local_prometheus_port: 19092
+  download_job: smirvaki-llama-model-download
+  deployment_name: smirvaki-llama-serving
+
+prom_window: 5m
+
+experiments:
+  # - name: tinyllama-cpu-steady
+  #   overlay: cpu
+  #   env_overrides:
+  #     HF_MODEL_REPO: TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF
+  #     HF_MODEL_FILE: tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+  #     S3_MODEL_PREFIX: s3://llm-training-outputs/tinyllama
+  #     S3_MODEL_FILE: tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+  #     LLAMA_THREADS: "8"
+  #     LLAMA_CONTEXT: "2048"
+  #     LLAMA_GPU_LAYERS: "0"
+  #     LLAMA_BATCH: "256"
+  #   k6_script: scripts/k6/steady_load.js
+  #   k6_vus: 10
+  #   k6_duration: 5m
+  #   route: chat_completions
+  # - name: tinyllama-cpu-steady
+  #   overlay: cpu
+  #   env_overrides:
+  #     HF_MODEL_REPO: TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF
+  #     HF_MODEL_FILE: tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+  #     S3_MODEL_PREFIX: s3://llm-training-outputs/tinyllama
+  #     S3_MODEL_FILE: tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+  #     LLAMA_THREADS: "8"
+  #     LLAMA_CONTEXT: "2048"
+  #     LLAMA_GPU_LAYERS: "0"
+  #     LLAMA_BATCH: "256"
+  #   k6_script: scripts/k6/ramp_load.js
+  #   k6_vus: 10
+  #   k6_duration: 5m
+  #   route: chat_completions
+  # - name: tinyllama-cpu-steady
+  #   overlay: cpu
+  #   env_overrides:
+  #     HF_MODEL_REPO: TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF
+  #     HF_MODEL_FILE: tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+  #     S3_MODEL_PREFIX: s3://llm-training-outputs/tinyllama
+  #     S3_MODEL_FILE: tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+  #     LLAMA_THREADS: "8"
+  #     LLAMA_CONTEXT: "2048"
+  #     LLAMA_GPU_LAYERS: "0"
+  #     LLAMA_BATCH: "256"
+  #   k6_script: scripts/k6/soak_load.js
+  #   k6_vus: 10
+  #   k6_duration: 5m
+  #   route: chat_completions
+  # - name: tinyllama-cpu-steady
+  #   overlay: cpu
+  #   env_overrides:
+  #     HF_MODEL_REPO: TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF
+  #     HF_MODEL_FILE: tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+  #     S3_MODEL_PREFIX: s3://llm-training-outputs/tinyllama
+  #     S3_MODEL_FILE: tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+  #     LLAMA_THREADS: "8"
+  #     LLAMA_CONTEXT: "2048"
+  #     LLAMA_GPU_LAYERS: "0"
+  #     LLAMA_BATCH: "256"
+  #   k6_script: scripts/k6/spike_load.js
+  #   k6_vus: 10
+  #   k6_duration: 5m
+  #   route: chat_completions
+  # - name: tinyllama-cpu-steady
+  #   overlay: cpu
+  #   env_overrides:
+  #     HF_MODEL_REPO: TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF
+  #     HF_MODEL_FILE: tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+  #     S3_MODEL_PREFIX: s3://llm-training-outputs/tinyllama
+  #     S3_MODEL_FILE: tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+  #     LLAMA_THREADS: "8"
+  #     LLAMA_CONTEXT: "2048"
+  #     LLAMA_GPU_LAYERS: "0"
+  #     LLAMA_BATCH: "256"
+  #   k6_script: scripts/k6/stress_load.js
+  #   k6_vus: 10
+  #   k6_duration: 5m
+  #   route: chat_completions
+  - name: tinyllama-gpu-steady
+    overlay: gpu
+    env_overrides:
+      HF_MODEL_REPO: TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF
+      HF_MODEL_FILE: tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+      S3_MODEL_PREFIX: s3://llm-training-outputs/tinyllama
+      S3_MODEL_FILE: tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+      LLAMA_THREADS: "8"
+      LLAMA_CONTEXT: "2048"
+      LLAMA_GPU_LAYERS: "0"
+      LLAMA_BATCH: "256"
+    k6_script: scripts/k6/steady_load.js
+    k6_vus: 10
+    k6_duration: 5m
+    route: chat_completions
+  - name: tinyllama-gpu-ramp
+    overlay: gpu
+    env_overrides:
+      HF_MODEL_REPO: TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF
+      HF_MODEL_FILE: tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+      S3_MODEL_PREFIX: s3://llm-training-outputs/tinyllama
+      S3_MODEL_FILE: tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+      LLAMA_THREADS: "8"
+      LLAMA_CONTEXT: "2048"
+      LLAMA_GPU_LAYERS: "0"
+      LLAMA_BATCH: "256"
+    k6_script: scripts/k6/ramp_load.js
+    k6_vus: 10
+    k6_duration: 5m
+    route: chat_completions
+  - name: tinyllama-gpu-soak
+    overlay: gpu
+    env_overrides:
+      HF_MODEL_REPO: TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF
+      HF_MODEL_FILE: tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+      S3_MODEL_PREFIX: s3://llm-training-outputs/tinyllama
+      S3_MODEL_FILE: tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+      LLAMA_THREADS: "8"
+      LLAMA_CONTEXT: "2048"
+      LLAMA_GPU_LAYERS: "0"
+      LLAMA_BATCH: "256"
+    k6_script: scripts/k6/soak_load.js
+    k6_vus: 10
+    k6_duration: 5m
+    route: chat_completions
+  - name: tinyllama-gpu-spike
+    overlay: gpu
+    env_overrides:
+      HF_MODEL_REPO: TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF
+      HF_MODEL_FILE: tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+      S3_MODEL_PREFIX: s3://llm-training-outputs/tinyllama
+      S3_MODEL_FILE: tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+      LLAMA_THREADS: "8"
+      LLAMA_CONTEXT: "2048"
+      LLAMA_GPU_LAYERS: "0"
+      LLAMA_BATCH: "256"
+    k6_script: scripts/k6/spike_load.js
+    k6_vus: 10
+    k6_duration: 5m
+    route: chat_completions
+  - name: tinyllama-gpu-stress
+    overlay: gpu
+    env_overrides:
+      HF_MODEL_REPO: TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF
+      HF_MODEL_FILE: tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+      S3_MODEL_PREFIX: s3://llm-training-outputs/tinyllama
+      S3_MODEL_FILE: tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+      LLAMA_THREADS: "8"
+      LLAMA_CONTEXT: "2048"
+      LLAMA_GPU_LAYERS: "0"
+      LLAMA_BATCH: "256"
+    k6_script: scripts/k6/stress_load.js
+    k6_vus: 10
+    k6_duration: 5m
+    route: chat_completions

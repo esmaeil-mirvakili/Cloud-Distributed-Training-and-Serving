@@ -1,0 +1,36 @@
+cluster:
+  namespace: llm-training
+  context: ""
+  base_env_file: infrastructure/k8s/aws/training/training.env
+  overlays:
+    baseline: infrastructure/k8s/aws/training
+    ds_2gpu: infrastructure/k8s/aws/training_2_gpu
+    ds_4gpu: infrastructure/k8s/aws/training_4_gpu
+    ds_8gpu: infrastructure/k8s/aws/training_8_gpu
+  statefulset_name: smirvaki-trainer
+  pod_selector: app=smirvaki-trainer
+
+experiments:
+  - name: baseline-1gpu
+    overlay: baseline
+    env_overrides:
+      HF_MODEL_REPO: meta-llama/Llama-2-7b-chat-hf
+      DATASET_NAME: databricks/databricks-dolly-15k
+      MAX_STEPS: "500"
+      PER_DEVICE_BATCH: "1"
+
+  - name: deepspeed-2gpu
+    overlay: ds_2gpu
+    env_overrides:
+      HF_MODEL_REPO: meta-llama/Llama-2-7b-chat-hf
+      DATASET_NAME: databricks/databricks-dolly-15k
+      MAX_STEPS: "500"
+      PER_DEVICE_BATCH: "1"
+
+  - name: deepspeed-4gpu
+    overlay: ds_4gpu
+    env_overrides:
+      HF_MODEL_REPO: meta-llama/Llama-2-7b-chat-hf
+      DATASET_NAME: databricks/databricks-dolly-15k
+      MAX_STEPS: "500"
+      PER_DEVICE_BATCH: "1"

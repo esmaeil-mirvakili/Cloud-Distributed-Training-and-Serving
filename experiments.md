@@ -28,6 +28,8 @@ B. Distributed training scaling: 2, 4, (8) GPUs (or whatever you can actually ge
 	•	Speedup = baseline_step_time / distributed_step_time
 	•	Scaling efficiency = speedup / N
 	•	Cost per run (see section 4)  ￼
+	•	Script: `python experiments/training/run_training_experiments.py --config experiments/training/training_config.example.yaml --output outputs/training_results.json`
+	•	Per-experiment: applies k8s overlay (baseline / 2/4/8 GPU), waits for rollout, captures trainer pod logs tail
 
 ⸻
 
@@ -68,19 +70,9 @@ A. Quality experiment
 Your plan: HPA scaling behind NGINX, evaluated using steady/ramp, spike/stress, soak; measure SLO compliance and scaling time.  ￼
 
 A. SLO compliance under load
-
-You defined an SLO target:  ￼
-	•	For the smaller model both on CPU and GPU (CPU: Q4_K_M; GPU: Q6_K as default configs):
-	•	Steady load
-	•	Ramp-up
-	•	Spike
-	•	Stress
-	•	Soak  ￼
+	•	Script: `python experiments/autoscaling/run_autoscaling_experiments.py --config experiments/autoscaling/autoscaling_config.example.yaml --output outputs/autoscaling_results.json`
+	•	Load: k6 script(s) per experiment (configurable); service is port-forwarded locally
 	•	Measure and report:
-	•	% requests meeting ttft P95 < 2s
-	•	% requests meeting ttft P95 < 5s
-	•	% requests meeting ttft P95 < 10s
-	•	% requests meeting ttft P95 < 20s
-	•	% requests meeting ttft P95 < 30s
-	•	Full ttft and latency distribution buckets (<1s, <5s, <10s)  ￼
-	•	Resource efficiency: average CPU/GPU utilization per replica and wasted headroom  ￼
+	•	% requests meeting ttft P95 < 2s / 5s / 10s / 20s / 30s (from Prometheus)
+	•	Latency P95, TTFT P95, latency bucket ratios (<1s, <5s, <10s)
+	•	Resource efficiency: average CPU/GPU utilization, GPU memory (from Prometheus)

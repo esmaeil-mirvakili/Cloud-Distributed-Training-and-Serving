@@ -42,40 +42,40 @@ experiments:
     total_requests: 20
     concurrency: 4
 
-  # - name: tinyllama-q6-gpu
-  #   overlay: gpu
-  #   env_overrides:
-  #     HF_MODEL_REPO: TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF
-  #     HF_MODEL_FILE: tinyllama-1.1b-chat-v1.0.Q6_K.gguf
-  #     S3_MODEL_PREFIX: s3://llm-training-outputs/tinyllama
-  #     S3_MODEL_FILE: tinyllama-1.1b-chat-v1.0.Q6_K.gguf
-  #     LLAMA_GPU_LAYERS: "-1"
-  #     LLAMA_BATCH: "512"
-  #   total_requests: 20
-  #   concurrency: 4
+  - name: tinyllama-q6-gpu
+    overlay: gpu
+    env_overrides:
+      HF_MODEL_REPO: TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF
+      HF_MODEL_FILE: tinyllama-1.1b-chat-v1.0.Q6_K.gguf
+      S3_MODEL_PREFIX: s3://llm-training-outputs/tinyllama
+      S3_MODEL_FILE: tinyllama-1.1b-chat-v1.0.Q6_K.gguf
+      LLAMA_GPU_LAYERS: "-1"
+      LLAMA_BATCH: "512"
+    total_requests: 200
+    concurrency: 4
 
-  # - name: phi2-q4-cpu
-  #   overlay: cpu
-  #   env_overrides:
-  #     HF_MODEL_REPO: TheBloke/Phi-2-GGUF
-  #     HF_MODEL_FILE: Phi-2.Q4_K_M.gguf
-  #     S3_MODEL_PREFIX: s3://llm-training-outputs/phi-2
-  #     S3_MODEL_FILE: Phi-2.Q4_K_M.gguf
-  #     LLAMA_THREADS: "16"
-  #     LLAMA_CONTEXT: "2048"
-  #     LLAMA_GPU_LAYERS: "0"
-  #     LLAMA_BATCH: "256"
-  #   total_requests: 12
-  #   concurrency: 3
+  - name: phi2-q4-cpu
+    overlay: cpu
+    env_overrides:
+      HF_MODEL_REPO: TheBloke/Phi-2-GGUF
+      HF_MODEL_FILE: Phi-2.Q4_K_M.gguf
+      S3_MODEL_PREFIX: s3://llm-training-outputs/phi-2
+      S3_MODEL_FILE: Phi-2.Q4_K_M.gguf
+      LLAMA_THREADS: "16"
+      LLAMA_CONTEXT: "2048"
+      LLAMA_GPU_LAYERS: "0"
+      LLAMA_BATCH: "256"
+    total_requests: 12
+    concurrency: 3
 
-  # - name: phi2-q6-gpu
-  #   overlay: gpu
-  #   env_overrides:
-  #     HF_MODEL_REPO: TheBloke/Phi-2-GGUF
-  #     HF_MODEL_FILE: Phi-2.Q6_K.gguf
-  #     S3_MODEL_PREFIX: s3://llm-training-outputs/phi-2
-  #     S3_MODEL_FILE: Phi-2.Q6_K.gguf
-  #     LLAMA_GPU_LAYERS: "-1"
-  #     LLAMA_BATCH: "512"
-  #   total_requests: 12
-  #   concurrency: 3
+  - name: phi2-q6-gpu
+    overlay: gpu
+    env_overrides:
+      HF_MODEL_REPO: TheBloke/Phi-2-GGUF
+      HF_MODEL_FILE: Phi-2.Q6_K.gguf
+      S3_MODEL_PREFIX: s3://llm-training-outputs/phi-2
+      S3_MODEL_FILE: Phi-2.Q6_K.gguf
+      LLAMA_GPU_LAYERS: "-1"
+      LLAMA_BATCH: "512"
+    total_requests: 120
+    concurrency: 3

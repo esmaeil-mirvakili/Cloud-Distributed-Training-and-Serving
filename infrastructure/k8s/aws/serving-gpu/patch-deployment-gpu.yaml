@@ -6,8 +6,6 @@ metadata:
 spec:
   template:
     spec:
-      nodeSelector:
-        nvidia.com/gpu.present: "true"
       tolerations:
         - key: nvidia.com/gpu
           operator: Exists
@@ -19,6 +17,7 @@ spec:
           env:
             - name: LLAMA_GPU_LAYERS
               value: "-1"
+              valueFrom: null
           resources:
             requests:
               nvidia.com/gpu: "1"

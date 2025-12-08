@@ -50,7 +50,7 @@ spec:
               : "${S3_MODEL_FILE:?S3_MODEL_FILE is required}"
               url="${S3_MODEL_PREFIX%/}/${S3_MODEL_FILE}"
               echo "Waiting for model object ${url}"
-              for i in $(seq 1 60); do
+              for i in $(seq 1 6000); do
                 if aws s3 ls "${url}" >/dev/null 2>&1; then
                   echo "Model found in S3"
                   break
