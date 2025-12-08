@@ -68,14 +68,19 @@ spec:
               mkdir -p "${LLAMA_MODEL_DIR}"
               dest="${LLAMA_MODEL_PATH:-${LLAMA_MODEL_DIR%/}/${HF_MODEL_FILE}}"
               url="https://huggingface.co/${HF_MODEL_REPO}/resolve/main/${HF_MODEL_FILE}"
+              s3_target="${S3_MODEL_PREFIX%/}/${S3_MODEL_FILE:-${HF_MODEL_FILE}}"
+              if aws s3 ls "${s3_target}" >/dev/null 2>&1; then
+                echo "Model already exists in S3 at ${s3_target}, skipping download/upload."
+                exit 0
+              fi
               echo "Downloading ${url} to ${dest}"
               if [ -n "${HF_TOKEN:-}" ]; then
                 curl -L -H "Authorization: Bearer ${HF_TOKEN}" -o "${dest}" "${url}"
               else
                 curl -L -o "${dest}" "${url}"
               fi
-              echo "Uploading ${dest} to ${S3_MODEL_PREFIX}"
-              aws s3 cp "${dest}" "${S3_MODEL_PREFIX%/}/${S3_MODEL_FILE:-${HF_MODEL_FILE}}" --only-show-errors
+              echo "Uploading ${dest} to ${s3_target}"
+              aws s3 cp "${dest}" "${s3_target}" --only-show-errors
               ls -lh "${LLAMA_MODEL_DIR}"
           volumeMounts:
             - name: model-storage

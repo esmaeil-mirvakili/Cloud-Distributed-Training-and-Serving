@@ -118,6 +118,7 @@ experiments:
       LLAMA_CONTEXT: "2048"
       LLAMA_GPU_LAYERS: "0"
       LLAMA_BATCH: "256"
+      LLAMA_MODEL_PATH: /models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
     k6_script: scripts/k6/ramp_load.js
     k6_vus: 10
     k6_duration: 5m
@@ -133,6 +134,7 @@ experiments:
       LLAMA_CONTEXT: "2048"
       LLAMA_GPU_LAYERS: "0"
       LLAMA_BATCH: "256"
+      LLAMA_MODEL_PATH: /models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
     k6_script: scripts/k6/soak_load.js
     k6_vus: 10
     k6_duration: 5m
@@ -148,6 +150,7 @@ experiments:
       LLAMA_CONTEXT: "2048"
       LLAMA_GPU_LAYERS: "0"
       LLAMA_BATCH: "256"
+      LLAMA_MODEL_PATH: /models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
     k6_script: scripts/k6/spike_load.js
     k6_vus: 10
     k6_duration: 5m
@@ -163,6 +166,7 @@ experiments:
       LLAMA_CONTEXT: "2048"
       LLAMA_GPU_LAYERS: "0"
       LLAMA_BATCH: "256"
+      LLAMA_MODEL_PATH: /models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
     k6_script: scripts/k6/stress_load.js
     k6_vus: 10
     k6_duration: 5m

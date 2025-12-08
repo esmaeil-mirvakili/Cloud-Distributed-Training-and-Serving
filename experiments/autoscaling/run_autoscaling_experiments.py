@@ -394,6 +394,7 @@ def main() -> None:
         )
         if args.cleanup:
             cleanup_bundles(cluster.get("context"), [res.bundle_path])
+        time.sleep(30)
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps({"results": results}, indent=2))
