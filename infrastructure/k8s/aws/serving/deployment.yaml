@@ -113,6 +113,16 @@ spec:
                 configMapKeyRef:
                   name: smirvaki-llama-model-config
                   key: LLAMA_BACKEND
+            - name: LLAMA_SERVER_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: smirvaki-llama-model-config
+                  key: LLAMA_SERVER_HOST
+            - name: LLAMA_SERVER_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: smirvaki-llama-model-config
+                  key: LLAMA_SERVER_PORT
             - name: LLAMA_SERVER_URL
               valueFrom:
                 configMapKeyRef:
@@ -123,6 +133,11 @@ spec:
                 configMapKeyRef:
                   name: smirvaki-llama-model-config
                   key: LLAMA_SERVER_TIMEOUT
+            - name: LLAMA_SERVER_EXTRA_FLAGS
+              valueFrom:
+                configMapKeyRef:
+                  name: smirvaki-llama-model-config
+                  key: LLAMA_SERVER_EXTRA_FLAGS
             - name: UVICORN_WORKERS
               valueFrom:
                 configMapKeyRef:

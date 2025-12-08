@@ -7,10 +7,13 @@ This follows the inference experiments in experiments.md:
 - Repeat on GPU for CPU vs GPU comparison.
 
 Workflow per experiment:
-1) Apply a model env ConfigMap (HF/S3 source, threads/batch/ctx/gpu layers).
-2) Recreate the model download job + serving deployment via kustomize overlay (cpu/gpu).
-3) Wait for the download job to finish and serving deployment to become ready.
-4) Port-forward serving + Prometheus, send a burst of chat requests, and read latency/tokens/memory from Prometheus.
+1) Build a temp kustomize bundle that includes:
+   - The CPU/GPU overlay
+   - A ConfigMap with per-experiment model/env settings
+2) `kubectl apply -k` that bundle (creates ConfigMap, download job, serving deploy)
+3) Wait for download job to finish and serving deployment to become ready
+4) Port-forward serving + Prometheus, send a burst of chat requests, and read metrics
+5) `kubectl delete -k` the bundle to isolate experiments
 """
 from __future__ import annotations
 
@@ -18,6 +21,8 @@ import argparse
 import asyncio
 import itertools
 import json
+import os
+import shutil
 import subprocess
 import sys
 import time
@@ -28,6 +33,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 import yaml
+import tempfile
 
 
 # ----------------------------
@@ -56,6 +62,11 @@ def read_env_file(path: Path) -> Dict[str, str]:
     return env
 
 
+def write_env_file(path: Path, env_data: Dict[str, str]) -> None:
+    lines = [f"{k}={v}" for k, v in env_data.items()]
+    path.write_text("\n".join(lines) + "\n")
+
+
 def kubectl_cmd(
     args: List[str],
     context: Optional[str],
@@ -79,30 +90,12 @@ def kubectl_cmd(
     return proc
 
 
-def apply_configmap(
-    namespace: str,
-    context: Optional[str],
-    env_data: Dict[str, str],
-) -> None:
-    manifest = {
-        "apiVersion": "v1",
-        "kind": "ConfigMap",
-        "metadata": {"name": "smirvaki-llama-model-config", "namespace": namespace},
-        "data": env_data,
-    }
-    yaml_body = yaml.safe_dump(manifest)
-    kubectl_cmd(["apply", "-f", "-"], context=context, input_str=yaml_body)
-
-
 def apply_kustomize(path: Path, context: Optional[str]) -> None:
     kubectl_cmd(["apply", "-k", str(path)], context=context)
 
 
-def delete_job(namespace: str, context: Optional[str], name: str) -> None:
-    kubectl_cmd(
-        ["-n", namespace, "delete", "job", name, "--ignore-not-found=true"],
-        context=context,
-    )
+def delete_kustomize(path: Path, context: Optional[str]) -> None:
+    kubectl_cmd(["delete", "-k", str(path)], context=context)
 
 
 def wait_for_job(namespace: str, context: Optional[str], name: str, timeout: str = "900s") -> None:
@@ -119,11 +112,35 @@ def wait_for_job(namespace: str, context: Optional[str], name: str, timeout: str
     )
 
 
-def rollout_restart(namespace: str, context: Optional[str], deployment: str) -> None:
-    kubectl_cmd(
-        ["-n", namespace, "rollout", "restart", f"deploy/{deployment}"],
-        context=context,
-    )
+def build_temp_bundle(namespace: str, overlay_path: Path, env_data: Dict[str, str]) -> Path:
+    """Create a temp kustomize bundle combining the overlay and a per-run model.env."""
+    tmpdir = Path(tempfile.mkdtemp(prefix="inference-bundle-"))
+
+    # Copy overlay parent to preserve relative references (e.g., ../serving)
+    overlay_parent_dest = tmpdir / "overlayroot"
+    shutil.copytree(overlay_path.parent, overlay_parent_dest, dirs_exist_ok=True)
+
+    # Overwrite model.env with per-experiment values inside copied overlay root
+    model_env_path = overlay_parent_dest / "serving" / "model.env"
+    if model_env_path.exists():
+        write_env_file(model_env_path, env_data)
+    else:
+        # Fallback: write alongside if path not present
+        model_env_path.parent.mkdir(parents=True, exist_ok=True)
+        write_env_file(model_env_path, env_data)
+
+    overlay_rel = Path(os.path.relpath(overlay_parent_dest / overlay_path.name, tmpdir))
+
+    kustomization = {
+        "apiVersion": "kustomize.config.k8s.io/v1beta1",
+        "kind": "Kustomization",
+        "namespace": namespace,
+        "resources": [
+            overlay_rel.as_posix(),
+        ],
+    }
+    (tmpdir / "kustomization.yaml").write_text(yaml.safe_dump(kustomization))
+    return tmpdir
 
 
 def rollout_status(namespace: str, context: Optional[str], deployment: str, timeout: str = "600s") -> None:
@@ -136,13 +153,6 @@ def rollout_status(namespace: str, context: Optional[str], deployment: str, time
             f"deploy/{deployment}",
             f"--timeout={timeout}",
         ],
-        context=context,
-    )
-
-
-def delete_configmap(namespace: str, context: Optional[str], name: str) -> None:
-    kubectl_cmd(
-        ["-n", namespace, "delete", "configmap", name, "--ignore-not-found=true"],
         context=context,
     )
 
@@ -298,6 +308,7 @@ def collect_prom_metrics(prom_url: str, route: str, window: str) -> Dict[str, Op
 class ExperimentResult:
     name: str
     overlay: str
+    bundle_path: str
     env: Dict[str, str]
     load: Dict[str, Any]
     prom_metrics: Dict[str, Optional[float]]
@@ -328,20 +339,14 @@ def run_experiment(
     env_overrides = exp_cfg.get("env_overrides", {})
     env_data = merge_env(base_env, env_overrides)
 
-    log(f"[{exp_cfg['name']}] Applying ConfigMap for model/env settings")
-    apply_configmap(namespace, context, env_data)
+    bundle_path = build_temp_bundle(namespace, overlay_path, env_data)
 
-    log(f"[{exp_cfg['name']}] Deleting previous model download job (if any)")
-    delete_job(namespace, context, "smirvaki-llama-model-download")
-
-    log(f"[{exp_cfg['name']}] Applying kustomize overlay: {overlay_path}")
-    apply_kustomize(overlay_path, context)
+    log(f"[{exp_cfg['name']}] Applying kustomize bundle: {bundle_path}")
+    apply_kustomize(bundle_path, context)
 
     log(f"[{exp_cfg['name']}] Waiting for model download job to complete")
     wait_for_job(namespace, context, "smirvaki-llama-model-download")
 
-    log(f"[{exp_cfg['name']}] Restarting serving deployment")
-    rollout_restart(namespace, context, "smirvaki-llama-serving")
     rollout_status(namespace, context, "smirvaki-llama-serving")
 
     serving_resource = f"svc/{cluster['service_name']}"
@@ -385,6 +390,7 @@ def run_experiment(
     return ExperimentResult(
         name=exp_cfg["name"],
         overlay=overlay_key,
+        bundle_path=str(bundle_path),
         env=env_data,
         load=load_cfg,
         prom_metrics=prom_metrics,
@@ -393,36 +399,18 @@ def run_experiment(
 
 
 def cleanup_cluster(
-    cluster: Dict[str, Any],
-    overlays_used: List[str],
-    delete_cm: bool = True,
+    context: Optional[str],
+    bundle_paths: List[str],
 ) -> None:
-    namespace = cluster["namespace"]
-    context = cluster.get("context")
-    overlays = cluster.get("overlays", {})
-
-    for overlay_key in dict.fromkeys(overlays_used):
-        if overlay_key not in overlays:
-            continue
-        overlay_path = Path(overlays[overlay_key]).resolve()
-        log(f"[cleanup] Deleting overlay {overlay_key} ({overlay_path})")
+    for bundle in bundle_paths:
+        path = Path(bundle)
+        log(f"[cleanup] Deleting kustomize bundle {path}")
         try:
-            kubectl_cmd(["delete", "-k", str(overlay_path)], context=context)
+            delete_kustomize(path, context)
         except Exception as exc:
-            warn(f"[cleanup] Failed to delete overlay {overlay_key}: {exc}")
-
-    log("[cleanup] Deleting model download job (best-effort)")
-    try:
-        delete_job(namespace, context, "smirvaki-llama-model-download")
-    except Exception as exc:
-        warn(f"[cleanup] Failed to delete job: {exc}")
-
-    if delete_cm:
-        log("[cleanup] Deleting model ConfigMap smirvaki-llama-model-config")
-        try:
-            delete_configmap(namespace, context, "smirvaki-llama-model-config")
-        except Exception as exc:
-            warn(f"[cleanup] Failed to delete ConfigMap: {exc}")
+            warn(f"[cleanup] Failed to delete {path}: {exc}")
+        if path.exists():
+            shutil.rmtree(path, ignore_errors=True)
 
 
 # ----------------------------
@@ -467,9 +455,8 @@ def main() -> None:
     base_env = read_env_file(base_env_path)
 
     results: List[Dict[str, Any]] = []
-    overlays_used: List[str] = []
+    bundle_paths: List[str] = []
     for exp in cfg["experiments"]:
-        overlays_used.append(exp["overlay"])
         result = run_experiment(
             exp_cfg=exp,
             cluster=cluster,
@@ -478,18 +465,23 @@ def main() -> None:
             prom_window=prom_window,
         )
         results.append(asdict(result))
+        bundle_paths.append(result.bundle_path)
         log(
             f"[{exp['name']}] lat_p50={result.prom_metrics.get('latency_p50')} "
             f"lat_p95={result.prom_metrics.get('latency_p95')} "
             f"tok_s={result.prom_metrics.get('tokens_per_second')}"
         )
+        if args.cleanup:
+            cleanup_cluster(cluster.get("context"), [result.bundle_path])
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps({"results": results}, indent=2))
     log(f"Wrote results to {args.output}")
 
-    if args.cleanup:
-        cleanup_cluster(cluster, overlays_used)
+    if not args.cleanup and bundle_paths:
+        log("[INFO] Cleanup disabled; applied bundles remain on the cluster:")
+        for bp in bundle_paths:
+            log(f" - {bp}")
 
 
 if __name__ == "__main__":

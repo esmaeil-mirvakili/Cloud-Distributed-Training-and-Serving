@@ -1,37 +1,82 @@
-# GPU-enabled llama.cpp serving image using llama-cpp-python with GGML_CUDA.
-FROM python:3.10-bookworm
+# syntax=docker/dockerfile:1.7
+# Much faster builds than installing CUDA into python:bookworm.
+# Build stage uses CUDA devel image; runtime stage uses CUDA runtime image.
+
+ARG CUDA_VERSION=12.3.1
+ARG UBUNTU_VERSION=22.04
+
+ARG LLAMA_CPP_REPO=https://github.com/ggerganov/llama.cpp.git
+ARG LLAMA_CPP_REF=master
+ARG LLAMA_CPP_PY_VERSION=0.2.90
+
+# Set this to your actual GPU arch to speed builds and reduce binary size.
+# Examples: A100=80, A10=86, L4/L40S=89, H100=90
+ARG CUDA_ARCHS=86
+
+# ---------------------------
+# Build
+# ---------------------------
+FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION} AS build
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    python3-pip \
+    python3-dev \
+    python3-venv \
+    git \
+    cmake \
+    ninja-build \
+    build-essential \
+    curl \
+    ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN python3 -m pip install --no-cache-dir --upgrade pip setuptools wheel
+
+# Build a wheel for llama-cpp-python (CUDA) so we can install it quickly in runtime.
+WORKDIR /wheelhouse
+RUN --mount=type=cache,target=/root/.cache/pip \
+    CUDACXX=/usr/local/cuda/bin/nvcc \
+    CMAKE_ARGS="-DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=${CUDA_ARCHS}" \
+    FORCE_CMAKE=1 \
+    pip wheel --no-binary=llama-cpp-python \
+      "llama-cpp-python==${LLAMA_CPP_PY_VERSION}"
+
+# Optional: build llama-server GPU binary (handy for debugging / benchmarking)
+RUN git clone --depth 1 --branch ${LLAMA_CPP_REF} ${LLAMA_CPP_REPO} /opt/llama.cpp
+RUN cmake -S /opt/llama.cpp -B /opt/llama.cpp/build \
+      -DLLAMA_BUILD_SERVER=ON \
+      -DLLAMA_BUILD_EXAMPLES=OFF \
+      -DLLAMA_METAL=OFF \
+      -DLLAMA_ACCELERATE=OFF \
+      -DLLAMA_CURL=OFF \
+      -DGGML_CUDA=ON \
+      -DCMAKE_CUDA_ARCHITECTURES=${CUDA_ARCHS} \
+      -DCMAKE_BUILD_TYPE=Release \
+  && cmake --build /opt/llama.cpp/build --config Release --target llama-server -j "$(nproc)"
+
+# ---------------------------
+# Runtime
+# ---------------------------
+FROM nvidia/cuda:${CUDA_VERSION}-runtime-ubuntu${UBUNTU_VERSION} AS runtime
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    LLAMA_MODEL_PATH=/models/model.gguf \
-    LLAMA_CPP_REPO=https://github.com/ggerganov/llama.cpp.git \
-    LLAMA_CPP_REF=master
+    LLAMA_MODEL_PATH=/models/model.gguf
 
-ARG LLAMA_CPP_PY_VERSION=0.2.90
-
-# Install CUDA toolkit 12.3.1 (includes nvcc) and build deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    software-properties-common \
-    build-essential \
-    cmake \
-    git \
-    curl \
-    python3-dev \
-    libcurl4 \
-    libcurl4-openssl-dev \
-    ninja-build && \
-    wget https://developer.download.nvidia.com/compute/cuda/12.3.1/local_installers/cuda-repo-debian12-12-3-local_12.3.1-545.23.08-1_amd64.deb && \
-    dpkg -i cuda-repo-debian12-12-3-local_12.3.1-545.23.08-1_amd64.deb && \
-    cp /var/cuda-repo-debian12-12-3-local/cuda-*-keyring.gpg /usr/share/keyrings/ && \
-    add-apt-repository contrib && \
-    apt-get update && \
-    apt-get -y install cuda-toolkit-12-3 && \
-    rm -f cuda-repo-debian12-12-3-local_12.3.1-545.23.08-1_amd64.deb && \
-    rm -rf /var/lib/apt/lists/*
+    python3 \
+    python3-pip \
+    ca-certificates \
+    libgomp1 \
+  && rm -rf /var/lib/apt/lists/*
 
-# Python deps (GPU build of llama-cpp-python)
-RUN pip install --no-cache-dir --upgrade pip
+RUN python3 -m pip install --no-cache-dir --upgrade pip
+
+# App deps (pure python / small)
 RUN pip install --no-cache-dir \
        fastapi \
        "uvicorn[standard]" \
@@ -40,17 +85,12 @@ RUN pip install --no-cache-dir \
        psutil \
        nvidia-ml-py3
 
-RUN CUDACXX=/usr/local/cuda/bin/nvcc CMAKE_ARGS="-DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=all-major" FORCE_CMAKE=1 \
-    pip install --no-cache-dir --no-binary=llama-cpp-python \
-    "git+https://github.com/abetlen/llama-cpp-python.git@v${LLAMA_CPP_PY_VERSION}"
+# Install the CUDA-built llama-cpp-python wheel from the build stage
+COPY --from=build /wheelhouse/*.whl /tmp/
+RUN pip install --no-cache-dir /tmp/*.whl && rm -rf /tmp/*.whl
 
-# Optional: build llama-server GPU binary (not used directly by python backend, but handy)
-WORKDIR /opt
-RUN git clone --depth 1 --branch ${LLAMA_CPP_REF} ${LLAMA_CPP_REPO} llama.cpp && \
-    cmake -S llama.cpp -B llama.cpp/build \
-      -DLLAMA_BUILD_SERVER=ON -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_METAL=OFF -DLLAMA_ACCELERATE=OFF -DLLAMA_CURL=OFF -DGGML_CUDA=ON -DCMAKE_BUILD_TYPE=Release && \
-    cmake --build llama.cpp/build --config Release --target llama-server -j "$(nproc)" && \
-    ln -s /opt/llama.cpp/build/bin/llama-server /usr/local/bin/llama-server
+# Bring in llama-server binary (optional but useful)
+COPY --from=build /opt/llama.cpp/build/bin/llama-server /usr/local/bin/llama-server
 
 WORKDIR /app
 
