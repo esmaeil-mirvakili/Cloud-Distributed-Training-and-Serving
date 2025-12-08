@@ -19,7 +19,7 @@ spec:
       initContainers:
         - name: wait-and-download-model
           image: amazon/aws-cli:2.17.40
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           env:
             - name: LLAMA_MODEL_DIR
               valueFrom:

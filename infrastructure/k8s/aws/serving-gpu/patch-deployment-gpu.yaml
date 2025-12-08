@@ -13,7 +13,7 @@ spec:
       containers:
         - name: api
           image: docker.io/esmaeilmirvakili/llama-serving-gpu:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           env:
             - name: LLAMA_GPU_LAYERS
               value: "-1"
